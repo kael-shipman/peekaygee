@@ -1,0 +1,95 @@
+#!/bin/bash
+
+set -e
+
+if [ -z "$D" ]; then
+    D="$(dirname "$(readlink -f "$0")")"
+    for libdir in "$D" "$PKG_LIBDIR" /usr/share/peekaygee; do
+        if [ -e "$libdir/libpeekaygee.sh" ]; then
+            . "$libdir/libpeekaygee.sh"
+            lib_loaded=true
+            break
+        fi
+    done
+fi
+if [ "$lib_loaded" != "true" ]; then
+    >&2 echo
+    >&2 echo "E: Couldn't find peekaygee libraries! Are you sure you've installed"
+    >&2 echo "   peekaygee correctly?"
+    >&2 echo
+    exit 5
+fi
+
+function echo_push_usage() {
+    echo
+    echo "SYNOPSIS"
+    echo "      $(basename "$0") [remote]"
+    echo
+    echo "DESCRIPTION"
+    echo "      Push one or more packages (found using global and repo-specific config files)"
+    echo "      to the given remote archive."
+    echo
+    echo "OPTIONS"
+    echo "      -h|--help"
+    echo "          Show this help text."
+    echo
+    echo
+}
+
+# Loop to gather options
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        -h|--help)
+            echo_push_usage
+            exit
+        ;;
+
+        --version)
+            echo
+            echo "$(basename "$0") version $PKG_VERSION"
+            echo
+            echo "See readme and license information, file bug reports, and view source code at"
+            echo "https://github.com/kael-shipman/peekaygee"
+            echo
+            exit
+        ;;
+
+        *)
+            if [ -z "$REMOTE" ]; then
+                REMOTE="$1"
+                shift
+            else
+                >&2 echo_push_usage
+                >&2 echo
+                >&2 echo "E: You've passed an invalid command or option: $1"
+                >&2 echo
+                exit 6
+            fi
+        ;;
+    esac
+done
+
+
+# Validate empties
+if [ -z ${REMOTE+x} ]; then
+    >&2 echo_push_usage
+    >&2 echo
+    >&2 echo "E: You haven't passed a remote!"
+    >&2 echo
+    exit 7
+fi
+
+
+# Check config to make sure remote exists
+if ! get_merged_config | jq ".remotes.$REMOTE" &>/dev/null; then
+    >&2 echo_push_usage
+    >&2 echo
+    >&2 echo "E: '$REMOTE' does not appear to be a configured remote. (Checked in config"
+    >&2 echo "   files $(find_config_files)"
+    >&2 echo
+    exit 8
+fi
+
+
+
+

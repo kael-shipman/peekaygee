@@ -1,0 +1,122 @@
+#!/bin/bash
+
+set -e
+
+D="$(dirname "$(readlink -f "$0")")"
+for libdir in "$D" "$PKG_LIBDIR" /usr/share/peekaygee; do
+    if [ -e "$libdir/libpeekaygee.sh" ]; then
+        . "$libdir/libpeekaygee.sh"
+        lib_loaded=true
+        break
+    fi
+done
+if [ "$lib_loaded" != "true" ]; then
+    >&2 echo
+    >&2 echo "E: Couldn't find peekaygee libraries! Are you sure you've installed"
+    >&2 echo "   peekaygee correctly?"
+    >&2 echo
+    exit 1
+fi
+
+export PKG_VERSION="::VERSION::"
+
+function echo_usage() {
+    echo
+    echo "SYNOPSIS"
+    echo "      $(basename "$0") [command] [command-options]"
+    echo
+    echo "DESCRIPTION"
+    echo "      \`peekaygee\` is the client program for the \`peekaygee\` package archive maintenance"
+    echo "      system. It is to be used on build machines to push built packages to remote archives"
+    echo "      for publication."
+    echo
+    echo "COMMANDS"
+    echo "      list [remote] ([pkg-spec])"
+    echo "          List all packages available on [remote], optionally filtered by [pkg-spec]"
+    echo
+    echo "      push [remote]"
+    echo "          Push all packages matching configured package definitions to [remote]"
+    echo
+    echo "      delete [remote] [pkg-spec]"
+    echo "          Delete all packages matching [pkg-spec] on [remote]"
+    echo
+    echo "      prune [remote ([pkg-spec]) [num-versions]"
+    echo "          Delete all older versions of packages on [remote], optionally matching"
+    echo "          [pkg-spec], saving the most recent [num-versions] versions"
+    echo
+    echo "GLOBAL OPTIONS"
+    echo "      -h|--help"
+    echo "          Show this help text. Note: you can also pass --help|-h to any subcommand"
+    echo "          to see more information about each."
+    echo
+    echo "      --version"
+    echo "          Display version information"
+    echo
+    echo
+    echo
+}
+
+# Initial loop to gather global options and main command
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        push|delete|prune|list)
+            COMMAND="$1"
+            shift
+            break
+        ;;
+
+        -h|--help)
+            echo_usage
+            exit
+        ;;
+
+        --version)
+            echo
+            echo "$(basename "$0") version $PKG_VERSION"
+            echo
+            echo "See readme and license information, file bug reports, and view source code at"
+            echo "https://github.com/kael-shipman/peekaygee"
+            echo
+            exit
+        ;;
+
+        *)
+            >&2 echo_usage
+            >&2 echo
+            >&2 echo "E: You've passed an invalid command or option: $1"
+            >&2 echo
+            exit 1
+        ;;
+    esac
+done
+
+
+# Validate empties
+if [ -z ${COMMAND+x} ]; then
+    >&2 echo_usage
+    >&2 echo
+    >&2 echo "E: You haven't passed a command!"
+    >&2 echo
+    exit 3
+fi
+
+
+
+# Run subcommand
+
+# See if it's local
+CMD="$D/peekaygee-$COMMAND"
+if [ ! -x "$CMD" ]; then
+    # Otherwise, see if it's on the path
+    if ! CMD="$(command -v "peekaygee-$COMMAND")"; then
+        >&2 echo
+        >&2 echo "E: Couldn't find subcommand peekaygee-$COMMAND! Are you sure peekaygee"
+        >&2 echo "   is properly installed?"
+        >&2 echo
+        exit 4
+    fi
+fi
+
+"$CMD" $@
+
+

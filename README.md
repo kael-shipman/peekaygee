@@ -142,3 +142,8 @@ On both the client and the server, the master process parses everything and does
 
 This master/worker, together with conventions for identifying workers, allows `peekaygee` to support any arbitrary package type, even types that are yet to be conceived. All you have to do to is name the binary correctly and `peekaygee` will identify it as a worker and call on it to do its work.
 
+
+## Unit Tests
+
+`peekaygee` uses [`bash_unit`](https://github.com/pgrange/bash_unit) for unit testing. To run tests, install bash-unit (see `bash_unit` readme), then run `bash_unit tests/*` from the repo root.
+
