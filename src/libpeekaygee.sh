@@ -42,3 +42,7 @@ function get_merged_config() {
     echo "$MERGED_CONFIG"
 }
 
+function config_jq() {
+    echo "$(get_merged_config | jq "$@")"
+}
+

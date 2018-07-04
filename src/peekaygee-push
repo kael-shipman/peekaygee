@@ -81,7 +81,7 @@ fi
 
 
 # Check config to make sure remote exists
-if ! get_merged_config | jq ".remotes.$REMOTE" &>/dev/null; then
+if ! get_merged_config | jq -e '.remotes."'$REMOTE'"' >/dev/null; then
     >&2 echo_push_usage
     >&2 echo
     >&2 echo "E: '$REMOTE' does not appear to be a configured remote. (Checked in config"
@@ -91,5 +91,47 @@ if ! get_merged_config | jq ".remotes.$REMOTE" &>/dev/null; then
 fi
 
 
+# All good now. Find packages, verify acceptability, and push to remote.
 
+SEARCH_DIRS="$(config_jq -r '."build-dirs" | join("%")' 2>/dev/null)"
+if [ -z "$SEARCH_DIRS" ]; then
+    >&2 echo
+    >&2 echo "E: You must specify a 'build-dirs' key in your config that contains an array of build directories"
+    >&2 echo "   to search for packages."
+    >&2 echo
+    exit 9
+fi
+
+IFS="%"
+for prf in "$(config_jq -r '.packages | keys | join("%")')"; do
+    prf="$(config_jq '.packages."'$prf'"')"
+    TYPE="$(echo $prf | jq -r '.type')"
+    MATCH="$(echo $prf | jq -r '.match')"
+    VISIBILITY="$(echo $prf | jq -r '.visibility')"
+    OPTIONS="$(echo $prf | jq '.options')"
+
+    if [ "$VISIBILITY" == "null" ]; then
+        VISIBILITY=
+    fi
+    if [ "$OPTIONS" == "null" ]; then
+        OPTIONS="{}"
+    fi
+
+    declare -a PKGS
+    for d in "$SEARCH_DIRS"; do
+        if [ ! -d "$d" ]; then
+            continue
+        fi
+        while read pkg; do
+            PKGS["${#PKGS[@]}"]="$pkg"
+        done < <(find "$d" -type f | egrep "$MATCH")
+    done
+
+    echo "Type: $TYPE"
+    echo "Match: $MATCH"
+    echo "Visibility: $VISIBILITY"
+    echo "Options: $OPTIONS"
+    echo "Packages: ${PKGS[@]}"
+done
+unset IFS
 
