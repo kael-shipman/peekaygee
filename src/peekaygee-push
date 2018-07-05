@@ -20,6 +20,31 @@ if [ "$lib_loaded" != "true" ]; then
     exit 5
 fi
 
+if [ "$lib_rexec_loaded" != "true" ]; then
+    if [ -z "$LIBREXEC_DIR" ]; then 
+        LIBREXEC_DIR="$(readlink -f "$(dirname "$(readlink -f "$0")")/../../librexec/src")" \
+        || \
+        LIBREXEC_DIR=
+    fi
+    for libdir in "$LIBREXEC_DIR" "$PKG_LIBDIR" /usr/lib/librexec; do
+        if [ -e "$libdir/librexec.sh" ]; then
+            . "$libdir/librexec.sh"
+            lib_rexec_loaded="true"
+            break
+        fi
+    done
+
+    if [ "$lib_rexec_loaded" != "true" ]; then
+        >&2 echo
+        >&2 echo "E: Couldn't find librexec! Make sure you install librexec before proceeding. (Note: you"
+        >&2 echo "   can set the directory to search for librexec using the \`LIBREXEC_DIR\` environment"
+        >&2 echo "   variable.)"
+        >&2 echo
+        exit 10
+    fi
+fi
+
+
 function echo_push_usage() {
     echo
     echo "SYNOPSIS"
@@ -80,14 +105,22 @@ if [ -z ${REMOTE+x} ]; then
 fi
 
 
-# Check config to make sure remote exists
-if ! get_merged_config | jq -e '.remotes."'$REMOTE'"' >/dev/null; then
+# Check config to make sure remote exists and has peekaygee-archive installed
+if ! config_jq -e '.remotes."'$REMOTE'"' >/dev/null; then
     >&2 echo_push_usage
     >&2 echo
     >&2 echo "E: '$REMOTE' does not appear to be a configured remote. (Checked in config"
     >&2 echo "   files $(find_config_files)"
     >&2 echo
     exit 8
+fi
+REMOTE_PATH="$(config_jq -r '.remotes."'$REMOTE'".url')"
+if ! rexec "$REMOTE_PATH" "command -v peekaygee-archive &>/dev/null"; then
+    >&2 echo
+    >&2 echo "E: It doesn't look like the remote '$REMOTE' has peekaygee-archive installed. Please"
+    >&2 echo "   install peekaygee-archive on the remote before continuing."
+    >&2 echo
+    exit 11
 fi
 
 
@@ -132,6 +165,15 @@ for prf in "$(config_jq -r '.packages | keys | join("%")')"; do
     echo "Visibility: $VISIBILITY"
     echo "Options: $OPTIONS"
     echo "Packages: ${PKGS[@]}"
+
+    if ! rexec "$REMOTE_PATH" "peekaygee-archive supports '$TYPE'"; then
+        >&2 echo
+        >&2 echo "E: Remote '$REMOTE' doesn't support archive type '$TYPE'. Skipping the following packages:"
+        >&2 echo
+        >&2 echo "   $(echo "${PKGS[@]}" | sed 's/ /\n   /g')"
+        >&2 echo
+        continue
+    fi
 done
 unset IFS
 

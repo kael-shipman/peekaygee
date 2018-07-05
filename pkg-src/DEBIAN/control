@@ -1,0 +1,10 @@
+Package: peekaygee-client
+Version: ::VERSION::
+Section: free
+Priority: optional
+Architecture: all
+Depends: librexec
+Installed-Size: 0
+Maintainer: Kael Shipman <kael.shipman@gmail.com>
+Description: The official peekaygee client for managing a peekaygee package archive
+ See https://github.com/kael-shipman/peekaygee for more details
