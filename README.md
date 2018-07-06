@@ -80,7 +80,7 @@ A configuration for this might look like so:
     "build-dirs": ["build"],
     "packages": {
         "apt": {
-            "match": ".*\.deb$",
+            "match": ".*\\.deb$",
             "type": "apt",
             "visibility": "private",
             "options": {
