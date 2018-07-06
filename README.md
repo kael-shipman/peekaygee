@@ -1,28 +1,28 @@
 Peekaygee
 ===========================================================================
 
-Peekaygee is a framework for quickly creating a package distribution service.
+Peekaygee is a framework for quickly creating a package distribution service. It is an open-source alternative to services like packagecloud.io and accomplish the same general goals of making it easy to publish packages for various package managers in various ways.
 
-Let's unpack that:
+There are a few things to note up front:
 
 1. It's a framework. If you don't like frameworks (and I personally don't, so I don't blame you if you don't either), you might not enjoy this project that much.
 2. I didn't specify what _kind_ of packages the service will distribute because I'd like that to be user definable. I'm building it to ship both public and private debian packages, but the fundamentals of providing a centrally-accessible package archive (like packagist for php, npmjs.org for javascript, maven for java, etc.) probably won't change much between specific types of packages, and those changes can be easily encapsulated.
-3. It's a distribution service, not a packaging service. It's predicated on the idea that you'll build your own packages, then _publish_ them to a defined location that this service will watch and process. The service is actually built to make _publishing_ easy, painless and robust, not packaging.
+3. It's a distribution service, not a packaging service. It's predicated on the idea that you'll build your own packages, then _publish_ them to a defined location using this service. The service is actually built to make _publishing_ easy, not packaging.
 
 
 ## Installation
 
 Since `peekaygee` is actually a composite of several different components, installation isn't quite as straightforward as I'd like. The following questions may help you out:
 
-* Are you setting up your package server? Install `peekaygeed` and related files (systemd files, etc.) from this package.
-* Are you setting up your local machine to push to a `peekaygee` server? Install `peekaygee` from [peekaygee-client](https://github.com/kael-shipman/peekaygee-client).
+* Are you setting up your package server? Install `peekaygee-archive` using the `peekaygee-server` package.
+* Are you setting up your local machine to push to a `peekaygee` server? Install `peekaygee` using the `peekaygee-client` package.
 * Which types of packages will you be serving out of your package server?
     * Debian packages (apt repo)? Install `peekaygee-client-apt` on your local machine and `peekaygee-server-apt` on your server.
-    * Other types? Currently no other types of packages are supported (but you can make workers for whatever type you need!)
+    * npm, composer, gem or other types? Currently no other types of packages are supported (but you can make workers for whatever type you need!)
 
-Once you've got everything installed, you'll have to create a server configuration on your server at `/etc/peekaygeed/config.json` and at least one of the following on your local machine: a system-wide default config file at `/etc/peekaygee/config.json`, a user config file at `~/.config/peekaygee/config.json`, and repo-specific configs at `[repo-root]/peekaygee.json` (with optional local overrides at `[repo-root]/peekaygee.local.json`).
+Once you've got everything installed, you'll have to make sure you've got the correct permissions for publishing packages on your server, as well as the appropriate peekaygee config files on both server and client, which may include a global config files in `~/.config/peekaygee/`, repo-specific config in the repo root (for clients), and archive-specific config (for servers) at the archive root. Config files on the server are named `peekaygee-archive.json`, while config files on the client are named `peekaygee.json`.
 
-With all that in place, you can start the `peekaygeed` daemon on the server (usually using `systemctl enable --now peekaygeed.service`), then push to it using the `peekaygee` client.
+With all that in place, you can start pushing packages.
 
 
 ## Usage
@@ -33,11 +33,12 @@ As mentioned above, `peekaygee` is a client/server system. It comprises the foll
 * `peekaygee` -- the client utility that reads local config files and attempts to push files and commands to one or more remote archive servers.
 
 ### Server
+
 To set up a `peekaygee` archive server, you might follow steps similar to this:
 
-1. Install the `peekaygee-server` package: `sudo apt-get install peekaygee-server`. This provides a global config directory at `/etc/peekaygee-server` as well as the `peekaygee-archive` utility.
-2. Initialize an archive: `sudo peekaygee-archive init ([path])`. This creates the path, if it doesn't already exist, and structures it according to `peekaygee` conventions. It also creates a config file for the archive at `/etc/peekaygee-server/config.json.d/[basename]`.
-3. You might also want to install some extra `peekaygee` workers: `sudo apt-get install peekaygee-npm-worker peekaygee-composer-worker peekaygee-maven-worker peekaygee-pacman-worker` (hypothetical)
+1. Install the `peekaygee-server` package: `sudo apt-get install peekaygee-server`.
+2. Initialize an archive: `sudo peekaygee-archive init ([path])`. This creates the path, if it doesn't already exist, and structures it according to `peekaygee` conventions.
+3. You might also want to install some extra `peekaygee` workers: `sudo apt-get install peekaygee-srvworker-npm peekaygee-srvworker-composer peekaygee-srvworker-maven peekaygee-srvworker-pacman` (hypothetical) on the server.
 
 Once set up, you can manually run `peekaygee-archive update` to check for changes. You can also put this in a systmed timer file (or cronjob) to regularly check for changes, though theoretically it wouldn't be necessary, since the `peekaygee` client will call this as the final step of any push.
 
@@ -62,9 +63,9 @@ my-project/
 
 We see from the presence of a `package.json` file that this is a node project. Presumably the `scripts/build.sh` script would compile the final product into a "binary" in the `build` directory.
 
-From there, you can simply run `peekaygee push main`, meaning, "push any recognzed packages in the `build` directory to the remote archive server named `main`." This would work, assuming you've already set up your global configuration to define a `main` server.
+From there, you can simply run `peekaygee push main`, meaning, "push any recognzed packages in the `build` directory to the remote archive server named `main`." This would work, assuming you've already set up your user configuration to define a `main` server.
 
-A global configuration for this might look like so:
+A configuration for this might look like so:
 
 ```json
 {
@@ -108,7 +109,7 @@ At the time of this writing, `peekaygee` was designed to facilitate the pushing 
 * `peekaygee push [remote]` -- Push any available packages to the given remote
 * `peekaygee delete [remote] [package spec]` -- Delete packages matching `package-spec` from the given remote
 * `peekaygee prune [remote] ([package-spec]) [num-versions]` -- Delete old versions of packages from remote, leaving only `num-versions` of each (optionally filtering by `package-spec`)
-* `peekaygee list [remote] ([type])` -- List packages on the given remote, optionally filtered by `package-spec`
+* `peekaygee list [remote] ([type]) ([package-spec])` -- List packages on the given remote, optionally filtered by `type` and `package-spec`
 
 
 ## Design Goals
@@ -146,4 +147,44 @@ This master/worker, together with conventions for identifying workers, allows `p
 ## Unit Tests
 
 `peekaygee` uses [`bash_unit`](https://github.com/pgrange/bash_unit) for unit testing. To run tests, install bash-unit (see `bash_unit` readme), then run `bash_unit tests/*` from the repo root.
+
+
+## Archive Structure
+
+Peekaygee archives have a very specific filesystem arrangement to facilitate all of the functions that they support. Here is the basic tree, with example archives for apt, npm, and packagist (though there could equally be more, less or different archives):
+
+```sh
+packages.peekaygee.org/
+├── incoming
+├── srv-config
+└── webroot
+    ├── index.html
+    ├── [name]-archive-keyring.gpg
+    ├── private
+    │   ├── apt
+    │   │   └── [vendor-structure]
+    │   ├── npm
+    │   │   └── [vendor-structure]
+    │   └── packagist
+    │       └── [vendor-structure]
+    └── public
+        ├── apt
+        │   └── [vendor-structure]
+        ├── npm
+        │   └── [vendor-structure]
+        └── packagist
+            └── [vendor-structure]
+```
+
+And here's an explanation of some of the files and directories:
+
+1. `incoming` directory -- This is the directory used by the `peekaygee` client program to place incoming packages and instruction files for the `peekaygee-archive` utility to handle.
+2. `srv-config` directory -- A directory containing machine- and user-generated server configuration files, such as apache and nginx virtualhost definitions.
+3. `webroot` directory -- The publicly accessible root of the archive wbsite.
+4. `webroot/index.html` -- A simple index file that may be used or discarded at will. It serves as a place where you can explain the archive and what it contains, and also serves to hide the supposedly-password-protected 'private' directory.
+5. `webroot/[name]-archive-keygring.gpg` -- The public gpg key used to sign packages in this archive.
+6. `webroot/private` -- A container for all password-protected private packages.
+7. `webroot/public` -- A container for all publicly-available packages.
+
+This is the structure that's created with `peekaygee-archive init ([path])` (minus the vendor-specific directories, which are created the first time a vendor worker runs on the archive).
 

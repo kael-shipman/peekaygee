@@ -1,0 +1,173 @@
+#!/bin/bash
+
+set -e
+
+D="$(dirname "$(readlink -f "$0")")"
+#for libdir in "$D" "$PEEKAYGEE_LIBDIR" /usr/lib/peekaygee; do
+#    if [ -e "$libdir/libpeekaygee.sh" ]; then
+#        . "$libdir/libpeekaygee.sh"
+#        lib_loaded=true
+#        break
+#    fi
+#done
+#if [ "$lib_loaded" != "true" ]; then
+#    >&2 echo
+#    >&2 echo "E: Couldn't find peekaygee libraries! Are you sure you've installed"
+#    >&2 echo "   peekaygee correctly?"
+#    >&2 echo
+#    exit 1
+#fi
+
+export PKG_VERSION="::VERSION::"
+export CONFFILE_NAME="peekaygee-archive.json"
+
+function echo_usage() {
+    echo
+    echo "SYNOPSIS"
+    echo "      $(basename "$0") [command] [command-options]"
+    echo
+    echo "DESCRIPTION"
+    echo "      \`peekaygee-archive\` is the server-side management program for the \`peekaygee\` package"
+    echo "      archive maintenance system. It is to be used on servers to coordinate and execute package"
+    echo "      archive maintenance tasks such as adding and deleting packages."
+    echo
+    echo "      This utility works by calling vendor-specific worker utilities to handle the operations"
+    echo "      requested. For example, suppose \`peekaygee-archive update /srv/www/my-repo\` is called."
+    echo "      \`peekaygee-archive\` will search in \`/srv/www/my-repo/incoming\` for new packages according"
+    echo "      to matching rules defined in its config files, then it will call, for example,"
+    echo "      \`peekaygee-srvworker-apt add /srv/www/my-repo/incoming/public/package.deb\` to handle adding"
+    echo "      the new package to the archive."
+    echo
+    echo "COMMANDS"
+    echo "      init ([path])"
+    echo "          Initializes a new archive, creating the necessary directory structure at using [path] as the"
+    echo "          root, if supplied, or the current working directory. Also adds a config entry for the archive."
+    echo
+    echo "      supports [type]"
+    echo "          Checks whether this archive manager supports archives of type \`type\`."
+    echo
+    echo "      update ([path])"
+    echo "          Checks for updates in the \`incoming\` directory of the archive indicated by [path], if"
+    echo "          given, the current working directory if it has an \`incoming\` directory, or in all"
+    echo "          configured archives if no path given and no \`incoming\` directory found."
+    echo
+    echo "GLOBAL OPTIONS"
+    echo "      -h|--help"
+    echo "          Show this help text. Note: you can also pass --help|-h to any subcommand"
+    echo "          to see more information about each."
+    echo
+    echo "      --version"
+    echo "          Display version information"
+    echo
+    echo
+    echo
+}
+
+# Initial loop to gather global options and main command
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        init|supports|update)
+            COMMAND="$1"
+            shift
+            break
+        ;;
+
+        -h|--help)
+            echo_usage
+            exit
+        ;;
+
+        --version)
+            echo
+            echo "$(basename "$0") version $PKG_VERSION"
+            echo
+            echo "See readme and license information, file bug reports, and view source code at"
+            echo "https://github.com/kael-shipman/peekaygee"
+            echo
+            exit
+        ;;
+
+        *)
+            >&2 echo_usage
+            >&2 echo
+            >&2 echo "E: You've passed an invalid command or option: $1"
+            >&2 echo
+            exit 1
+        ;;
+    esac
+done
+
+
+# Validate empties
+if [ -z ${COMMAND+x} ]; then
+    >&2 echo_usage
+    >&2 echo
+    >&2 echo "E: You haven't passed a command!"
+    >&2 echo
+    exit 3
+fi
+
+
+
+# Execute subcommand logic
+
+# Init
+if [ "$COMMAND" == "init" ]; then
+    ROOT="$1"
+    if [ -z "$ROOT" ]; then
+        ROOT="$PWD"
+    fi
+    mkdir -p "$ROOT/srv-config"
+    mkdir -p "$ROOT"/{incoming,webroot}/{public,private}
+
+    #TODO: Create apache and nginx vhost templates
+
+
+
+# Supports
+elif [ "$COMMAND" == "supports" ]; then
+    TYPE="$1"
+    if echo "$TYPE" | grep -q '[^A-Za-z0-9_-]'; then
+        >&2 echo
+        >&2 echo "E: Type '$TYPE' doesn't look like a real type. Is this is a mistake?"
+        >&2 echo
+        exit 4
+    fi
+
+    if command -v "peekaygee-srvworker-$TYPE" &>/dev/null; then
+        echo "true"
+        exit
+    else
+        echo "false"
+        exit 100
+    fi
+
+
+
+# Update
+elif [ "$COMMAND" == "update" ]; then
+    # First argument should be a path to an archive
+    ARCHIVE="$1"
+    if [ -z "$ARCHIVE" ]; then
+        # If not, maybe the present working directory is an archive
+        if [ -d "$PWD/incoming" ]; then
+            ARCHIVE="$PWD"
+        fi
+    fi
+
+    # If we have a specific archivep path, then make sure it's initialized
+    if [ -n "$ARCHIVE" ]; then
+        if [ ! -d "$ARCHIVE/incoming" ]; then
+            "$0" init "$ARCHIVE"
+        fi
+
+        >&2 echo "E: Not yet implemented"
+        exit 507
+        
+    # Otherwise, update all known archives
+    else
+        >&2 echo "E: Not yet implemented"
+        exit 507
+    fi
+fi
+

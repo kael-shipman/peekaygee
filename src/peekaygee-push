@@ -4,7 +4,7 @@ set -e
 
 if [ -z "$D" ]; then
     D="$(dirname "$(readlink -f "$0")")"
-    for libdir in "$D" "$PKG_LIBDIR" /usr/share/peekaygee; do
+    for libdir in "$D" "$PEEKAYGEE_LIBDIR" /usr/lib/peekaygee; do
         if [ -e "$libdir/libpeekaygee.sh" ]; then
             . "$libdir/libpeekaygee.sh"
             lib_loaded=true
@@ -26,7 +26,7 @@ if [ "$lib_rexec_loaded" != "true" ]; then
         || \
         LIBREXEC_DIR=
     fi
-    for libdir in "$LIBREXEC_DIR" "$PKG_LIBDIR" /usr/lib/librexec; do
+    for libdir in "$LIBREXEC_DIR" "$REXEC_LIBDIR" /usr/lib/librexec; do
         if [ -e "$libdir/librexec.sh" ]; then
             . "$libdir/librexec.sh"
             lib_rexec_loaded="true"
@@ -43,6 +43,8 @@ if [ "$lib_rexec_loaded" != "true" ]; then
         exit 10
     fi
 fi
+
+CONFFILE_NAME="peekaygee.json"
 
 
 function echo_push_usage() {
@@ -105,7 +107,7 @@ if [ -z ${REMOTE+x} ]; then
 fi
 
 
-# Check config to make sure remote exists and has peekaygee-archive installed
+# Check config to make sure remote exists
 if ! config_jq -e '.remotes."'$REMOTE'"' >/dev/null; then
     >&2 echo_push_usage
     >&2 echo
@@ -115,12 +117,22 @@ if ! config_jq -e '.remotes."'$REMOTE'"' >/dev/null; then
     exit 8
 fi
 REMOTE_PATH="$(config_jq -r '.remotes."'$REMOTE'".url')"
+
+# Make sure peekaygee-archive is installed
 if ! rexec "$REMOTE_PATH" "command -v peekaygee-archive &>/dev/null"; then
     >&2 echo
     >&2 echo "E: It doesn't look like the remote '$REMOTE' has peekaygee-archive installed. Please"
     >&2 echo "   install peekaygee-archive on the remote before continuing."
     >&2 echo
     exit 11
+fi
+
+# Make sure archive is initialized
+if ! rexec "$REMOTE_PATH" 'peekaygee-archive init "::path::"'; then
+    >&2 echo
+    >&2 echo "E: Couldn't initialize '$REMOTE_PATH'. Can't continue."
+    >&2 echo
+    continue
 fi
 
 
@@ -137,14 +149,20 @@ fi
 
 IFS="%"
 for prf in "$(config_jq -r '.packages | keys | join("%")')"; do
-    prf="$(config_jq '.packages."'$prf'"')"
-    TYPE="$(echo $prf | jq -r '.type')"
-    MATCH="$(echo $prf | jq -r '.match')"
-    VISIBILITY="$(echo $prf | jq -r '.visibility')"
-    OPTIONS="$(echo $prf | jq '.options')"
+    prfconf="$(config_jq '.packages."'$prf'"')"
+    TYPE="$(echo $prfconf | jq -r '.type')"
+    MATCH="$(echo $prfconf | jq -r '.match')"
+    VISIBILITY="$(echo $prfconf | jq -r '.visibility')"
+    OPTIONS="$(echo $prfconf | jq '.options')"
 
     if [ "$VISIBILITY" == "null" ]; then
-        VISIBILITY=
+        VISIBILITY=public
+    elif [ "$VISIBILITY" != "public" ] && [ "$VISIBILITY" != "private" ]; then
+        >&2 echo
+        >&2 echo "E: Unrecognized visibility: '$VISIBILITY'. Should be 'public' or 'private'. Skipping"
+        >&2 echo "   $prf files."
+        >&2 echo
+        continue
     fi
     if [ "$OPTIONS" == "null" ]; then
         OPTIONS="{}"
@@ -160,13 +178,13 @@ for prf in "$(config_jq -r '.packages | keys | join("%")')"; do
         done < <(find "$d" -type f | egrep "$MATCH")
     done
 
-    echo "Type: $TYPE"
-    echo "Match: $MATCH"
-    echo "Visibility: $VISIBILITY"
-    echo "Options: $OPTIONS"
-    echo "Packages: ${PKGS[@]}"
+    #echo "Type: $TYPE"
+    #echo "Match: $MATCH"
+    #echo "Visibility: $VISIBILITY"
+    #echo "Options: $OPTIONS"
+    #echo "Packages: ${PKGS[@]}"
 
-    if ! rexec "$REMOTE_PATH" "peekaygee-archive supports '$TYPE'"; then
+    if ! rexec "$REMOTE_PATH" "peekaygee-archive supports '$TYPE'" >/dev/null; then
         >&2 echo
         >&2 echo "E: Remote '$REMOTE' doesn't support archive type '$TYPE'. Skipping the following packages:"
         >&2 echo
@@ -174,6 +192,16 @@ for prf in "$(config_jq -r '.packages | keys | join("%")')"; do
         >&2 echo
         continue
     fi
+
+    if ! rsync ${PKGS[@]} "$REMOTE_PATH/incoming/$VISIBILITY/"; then
+        >&2 echo
+        >&2 echo "E: Couldn't push packages to remote '$REMOTE' at '$REMOTE_PATH'"
+        >&2 echo
+        continue
+    fi
 done
 unset IFS
+
+# Now that all packages have been uploaded, update the archive
+rexec "$REMOTE_PATH" 'peekaygee-archive update "::path::"'
 

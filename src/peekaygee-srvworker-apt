@@ -4,8 +4,8 @@ set -e
 
 D="$(dirname "$(readlink -f "$0")")"
 for libdir in "$D" "$PEEKAYGEE_LIBDIR" /usr/lib/peekaygee; do
-    if [ -e "$libdir/libpeekaygee.sh" ]; then
-        . "$libdir/libpeekaygee.sh"
+    if [ -e "$libdir/libpeekaygee-srvworker.sh" ]; then
+        . "$libdir/libpeekaygee-srvworker.sh"
         lib_loaded=true
         break
     fi
@@ -26,23 +26,17 @@ function echo_usage() {
     echo "      $(basename "$0") [command] [command-options]"
     echo
     echo "DESCRIPTION"
-    echo "      \`peekaygee\` is the client program for the \`peekaygee\` package archive maintenance"
-    echo "      system. It is to be used on build machines to push built packages to remote archives"
-    echo "      for publication."
+    echo "      \`peekaygee-srvworker-apt\` is a \`peekaygee\` server-side worker program that handles archive"
+    echo "      maintenance tasks for apt package archives."
     echo
     echo "COMMANDS"
-    echo "      list [remote] ([pkg-spec])"
-    echo "          List all packages available on [remote], optionally filtered by [pkg-spec]"
+    echo "      add [archive-path] [debfile] [json-options-str]"
+    echo "          Adds package file [debfile] to the peekaygee archive at [archive-path], using [json-options-str]"
+    echo "          to determine certain characteristics"
     echo
-    echo "      push [remote]"
-    echo "          Push all packages matching configured package definitions to [remote]"
-    echo
-    echo "      delete [remote] [pkg-spec]"
-    echo "          Delete all packages matching [pkg-spec] on [remote]"
-    echo
-    echo "      prune [remote ([pkg-spec]) [num-versions]"
-    echo "          Delete all older versions of packages on [remote], optionally matching"
-    echo "          [pkg-spec], saving the most recent [num-versions] versions"
+    echo "      remove [archive-path] [pkg-spec] [json-options-str]"
+    echo "          removes all packages matching [pkg-spec] from the peekaygee archive at [archive-path], using"
+    echo "          [json-options-str] to determine certain characteristics"
     echo
     echo "GLOBAL OPTIONS"
     echo "      -h|--help"
@@ -59,7 +53,7 @@ function echo_usage() {
 # Initial loop to gather global options and main command
 while [ "$#" -gt 0 ]; do
     case "$1" in
-        push|delete|prune|list)
+        add|remove)
             COMMAND="$1"
             shift
             break
@@ -91,6 +85,15 @@ while [ "$#" -gt 0 ]; do
 done
 
 
+# Validate dependencies
+if ! command -v reprepro &>/dev/null; then
+    >&2 echo
+    >&2 echo "E: Required dependency reprepro appears to be missing. Can't continue."
+    >&2 echo
+    exit 19
+fi
+
+
 # Validate empties
 if [ -z ${COMMAND+x} ]; then
     >&2 echo_usage
@@ -102,21 +105,29 @@ fi
 
 
 
-# Run subcommand
+# Execute subcommand logic
 
-# See if it's local
-CMD="$D/peekaygee-$COMMAND"
-if [ ! -x "$CMD" ]; then
-    # Otherwise, see if it's on the path
-    if ! CMD="$(command -v "peekaygee-$COMMAND")"; then
+ARCHIVE_TYPE=apt
+
+if [ "$COMMAND" == "add" ]; then
+    # Defines ARCHIVE, DEBFILE, OPTIONS, and TARG_ARCHIVE, and throws appropriate errors
+    peekaygee_prep_srvworker_add
+
+    if [ ! -e "$TARG_ARCHIVE/conf/distributions" ]; then
         >&2 echo
-        >&2 echo "E: Couldn't find subcommand peekaygee-$COMMAND! Are you sure peekaygee"
-        >&2 echo "   is properly installed?"
+        >&2 echo "E: It looks like you haven't yet configured your reprepro archive at '$TARG_ARCHIVE'."
+        >&2 echo "   You must configure this archive by creating a \`distributions\` file at"
+        >&2 echo "   '$TARG_ARCHIVE/conf/distributions'"
         >&2 echo
-        exit 4
+        exit 21
     fi
-fi
 
-"$CMD" $@
+    >&2 echo "E: Not yet implemented"
+    exit 507
+
+elif [ "$COMMAND" == "remove" ]; then
+    >&2 echo "E: Not yet implemented"
+    exit 507
+fi
 
 

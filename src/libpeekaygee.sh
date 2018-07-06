@@ -1,6 +1,15 @@
 #!/bin/bash
 
 function find_config_files() {
+    if [ -z "$CONFFILE_NAME" ]; then
+        >&2 echo
+        >&2 echo "E: Programmer: Function \`find_config_files\` requires global variable CONFFILE_NAME to be set to the"
+        >&2 echo "   basename of the config file being searched for. Usually, this will be either 'peekaygee.json' or"
+        >&2 echo "   'peekaygee-archive.json'."
+        >&2 echo
+        exit 88
+    fi
+
     if ! declare -p CONFIG_FILES 2> /dev/null | grep -q '^declare \-ga'; then
         declare -ga CONFIG_FILES
         local HOME_CONF="$HOME/.config/peekaygee"
