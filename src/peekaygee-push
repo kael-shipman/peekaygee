@@ -183,7 +183,7 @@ fi
 
 # All good now. Find packages, verify acceptability, and push to remote.
 
-SEARCH_DIRS="$(config_jq -r '."build-dirs" | join("'$'\30''")' 2>/dev/null)"
+SEARCH_DIRS="$(config_jq -r '."build-dirs" | join("'$'\30''")')"
 if [ -z "$SEARCH_DIRS" ]; then
     >&2 echo
     >&2 echo "E: You must specify a 'build-dirs' key in your config that contains an array of build directories"
@@ -194,8 +194,16 @@ else
     say 3 "Search dirs: '$(echo "$SEARCH_DIRS" | tr $'\30' ' ')'"
 fi
 
+PRESERVE_PUSHED="$(config_jq -r '."preserve-pushed"')"
+if [ "$PRESERVE_PUSHED" != "true" ]; then
+    say 3 "Preserve pushed (raw value): $PRESERVE_PUSHED"
+    PRESERVE_PUSHED="false"
+fi
+say 2 "Preserve pushed packages: $PRESERVE_PUSHED"
+
 IFS=$'\30'
 PKGCNT=0
+ERRORS=0
 for prf in $(config_jq -r '.packages | keys | join("'$'\30''")'); do
     say 1 "Processing package profile '$prf'"
     prfconf="$(config_jq ".packages.\"$prf\"")"
@@ -208,11 +216,13 @@ for prf in $(config_jq -r '.packages | keys | join("'$'\30''")'); do
 
     say 2 "Profile '$prf': $prfconf"
 
+    # Set other variables
     TYPE="$(echo $prfconf | jq -r '.type')"
     MATCH="$(echo $prfconf | jq -r '.match')"
     VISIBILITY="$(echo $prfconf | jq -r '.visibility')"
     OPTIONS="$(echo $prfconf | jq '.options')"
 
+    # Default to "public" visibility, but verify value
     if [ "$VISIBILITY" == "null" ]; then
         say 3 "Visibility null; defaulting to 'public'"
         VISIBILITY=public
@@ -221,9 +231,11 @@ for prf in $(config_jq -r '.packages | keys | join("'$'\30''")'); do
         >&2 echo "E: Unrecognized visibility: '$VISIBILITY'. Should be 'public' or 'private'. Skipping"
         >&2 echo "   $prf files."
         >&2 echo
+        !((ERRORS++))
         continue
     fi
 
+    # Search build dirs for matching packages
     PKGS=
     say 2 "Searching for packages...." 
     for d in "$SEARCH_DIRS"; do
@@ -250,29 +262,48 @@ for prf in $(config_jq -r '.packages | keys | join("'$'\30''")'); do
     say 2 "Packages: $(echo "$PKGS" | tr $'\30' ' ')"
     say 2
 
+    # Make sure there are packages to push
+    if [ -z "$PKGS" ]; then
+        >&2 echo
+        >&2 echo "W: No packages found for type '$TYPE'"
+        >&2 echo
+        continue
+    fi
+
+    # Make sure the remote supports this type of package
+    say 3 "Checking remote for support or '$TYPE' packages"
     if ! rexec "$REMOTE_PATH" "peekaygee-archive supports '$TYPE'" >/dev/null; then
         >&2 echo
         >&2 echo "E: Remote '$REMOTE' doesn't support archive type '$TYPE'. Skipping the following packages:"
         >&2 echo
         >&2 echo "   $(echo "$PKGS" | sed 's/'$'\30''/\n   /g')"
         >&2 echo
+        !((ERRORS++))
         continue
     else
         say 2 "Remote supports package type '$TYPE'"
     fi
 
+    # Push each package up, creating an options file for it also, if applicable
     for pkg in $PKGS; do
+        success="true"
         say 0 "   - pushing '$pkg' to $VISIBILITY archive..."
         if ! rsync -u "$pkg" "$REMOTE_PATH/incoming/$VISIBILITY/"; then
+            success="false"
             >&2 echo
             >&2 echo "     E: Couldn't push package '$pkg' to remote '$REMOTE' at '$REMOTE_PATH'"
             >&2 echo
+            !((ERRORS++))
         else
-            !((PKGCNT++))
+            # If push succeeded, create an options file
             if [ "$OPTIONS" != "null" ]; then
                 optsfile="$(basename "$pkg").opts"
                 say 1 "  - creating options file '$optsfile'"
+
+                # If the options file creation fails, roll back
                 if ! rexec "$REMOTE_PATH" "echo '$OPTIONS' > ::path::/incoming/$VISIBILITY/$optsfile"; then
+                    success="false"
+                    !((ERRORS++))
                     >&2 echo
                     >&2 echo "     E: Couldn't create options file for package '$pkg'. Rolling back..."
                     >&2 echo
@@ -281,13 +312,27 @@ for prf in $(config_jq -r '.packages | keys | join("'$'\30''")'); do
             else
                 say 2 "No options file created."
             fi
+
+            # If we were successful, increment and optionally delete local package
+            if [ "$success" == "true" ]; then
+                !((PKGCNT++))
+                if [ "$PRESERVE_PUSHED" != "true" ]; then
+                    rm "$pkg" || true
+                fi
+            fi
         fi
     done
 done
 unset IFS
 
+
+# Done pushing, now update the remote and report
 say 0
 if [ "$PKGCNT" -gt 0 ]; then
+    err=
+    if [ "$ERRORS" -gt 0 ]; then
+        err=" (with $ERRORS errors)"
+    fi
     say 0 "Pushed $PKGCNT packages; now calling update on remote...."
 
     # Now that all packages have been uploaded, update the archive
@@ -300,6 +345,10 @@ if [ "$PKGCNT" -gt 0 ]; then
         say 0 "Update successful. Packages pushed."
     fi
 else
-    say 0 "Nothing pushed. All done."
+    if [ "$ERRORS" -gt 0 ]; then
+        say 0 "Nothing pushed, although there were $ERRORS errors."
+    else
+        say 0 "Nothing pushed; all done."
+    fi
 fi
 
