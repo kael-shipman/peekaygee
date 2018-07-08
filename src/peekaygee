@@ -2,28 +2,15 @@
 
 set -e
 
-D="$(dirname "$(readlink -f "$0")")"
-for libdir in "$D" "$PEEKAYGEE_LIBDIR" /usr/lib/peekaygee; do
-    if [ -e "$libdir/libpeekaygee.sh" ]; then
-        . "$libdir/libpeekaygee.sh"
-        lib_loaded=true
-        break
-    fi
-done
-if [ "$lib_loaded" != "true" ]; then
-    >&2 echo
-    >&2 echo "E: Couldn't find peekaygee libraries! Are you sure you've installed"
-    >&2 echo "   peekaygee correctly?"
-    >&2 echo
-    exit 1
-fi
 
 export PKG_VERSION="::VERSION::"
+SELF="$(basename "$0")"
+
 
 function echo_usage() {
     echo
     echo "SYNOPSIS"
-    echo "      $(basename "$0") [command] [command-options]"
+    echo "      $SELF [command] [command-options]"
     echo
     echo "DESCRIPTION"
     echo "      \`peekaygee\` is the client program for the \`peekaygee\` package archive maintenance"
@@ -56,7 +43,9 @@ function echo_usage() {
     echo
 }
 
+
 # Initial loop to gather global options and main command
+VERBOSITY=0
 while [ "$#" -gt 0 ]; do
     case "$1" in
         push|delete|prune|list)
@@ -69,6 +58,11 @@ while [ "$#" -gt 0 ]; do
             echo_usage
             exit
         ;;
+
+        -q) VERBOSITY=-1; shift ;;
+        -v) !((VERBOSITY++)); shift ;;
+        -vv) VERBOSITY=2; shift ;;
+        -vvv) VERBOSITY=3; shift ;;
 
         --version)
             echo
@@ -91,6 +85,56 @@ while [ "$#" -gt 0 ]; do
 done
 
 
+# Load libraries
+
+# libpeekaygee
+D="$(dirname "$(readlink -f "$0")")"
+for libdir in "$D" "$PEEKAYGEE_LIBDIR" /usr/lib/peekaygee; do
+    if [ -e "$libdir/libpeekaygee.sh" ]; then
+        . "$libdir/libpeekaygee.sh"
+        lib_loaded=true
+        break
+    fi
+done
+if [ "$lib_loaded" != "true" ]; then
+    >&2 echo
+    >&2 echo "E: Couldn't find peekaygee libraries! Are you sure you've installed"
+    >&2 echo "   peekaygee correctly?"
+    >&2 echo
+    exit 1
+fi
+
+say 1 "Arguments gathered and libraries loaded"
+
+# Rework arguments into an array for passing to sub-command
+args=()
+for arg in $@; do
+    args+=("$arg");
+done
+
+# Rework verbosity for sub-command
+v=
+i="$VERBOSITY"
+while [ "$i" -gt 0 ]; do
+    if [ -z "$v" ]; then
+        v="-"
+    fi
+    v="${v}v"
+    !((i--))
+done
+if [ "$VERBOSITY" -eq -1 ]; then
+    v="-q"
+fi
+if [ -n "$v" ]; then
+    args+=("$v")
+fi
+
+
+# Info
+say 2 "Sub-command: $COMMAND ${args[@]}"
+say 2 "Verbosity: $VERBOSITY"
+
+
 # Validate empties
 if [ -z ${COMMAND+x} ]; then
     >&2 echo_usage
@@ -103,6 +147,8 @@ fi
 
 
 # Run subcommand
+
+say 1 "Running sub-command"
 
 # See if it's local
 CMD="$D/peekaygee-$COMMAND"
@@ -117,6 +163,6 @@ if [ ! -x "$CMD" ]; then
     fi
 fi
 
-"$CMD" $@
+"$CMD" ${args[@]}
 
 

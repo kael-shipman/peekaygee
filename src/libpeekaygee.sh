@@ -2,6 +2,25 @@
 
 set -e
 
+function say() {
+    # Make sure we've got verbosity
+    if [ -z "$VERBOSITY" ]; then
+        >&2 echo "E: Programmer: You must set the VERBOSITY global variable to an integer"
+        exit 33
+    fi
+
+    # Make sure we've passed a level for this message
+    if ! [ "$1" -eq "$1" ] &>/dev/null; then
+        >&2 echo "E: Programmer: First argument to 'say' must be an integer representing"
+        >&2 echo "   level of verbosity at which to output this message"
+        exit 34
+    fi
+
+    if [ "$1" -le "$VERBOSITY" ]; then
+        echo "$2"
+    fi
+}
+
 function find_config_files() {
     if [ -z "$CONFFILE_NAME" ]; then
         >&2 echo

@@ -2,55 +2,15 @@
 
 set -e
 
-if [ -z "$D" ]; then
-    D="$(dirname "$(readlink -f "$0")")"
-    for libdir in "$D" "$PEEKAYGEE_LIBDIR" /usr/lib/peekaygee; do
-        if [ -e "$libdir/libpeekaygee.sh" ]; then
-            . "$libdir/libpeekaygee.sh"
-            lib_loaded=true
-            break
-        fi
-    done
-fi
-if [ "$lib_loaded" != "true" ]; then
-    >&2 echo
-    >&2 echo "E: Couldn't find peekaygee libraries! Are you sure you've installed"
-    >&2 echo "   peekaygee correctly?"
-    >&2 echo
-    exit 5
-fi
-
-if [ "$lib_rexec_loaded" != "true" ]; then
-    if [ -z "$LIBREXEC_DIR" ]; then 
-        LIBREXEC_DIR="$(readlink -f "$(dirname "$(readlink -f "$0")")/../../librexec/src")" \
-        || \
-        LIBREXEC_DIR=
-    fi
-    for libdir in "$LIBREXEC_DIR" "$REXEC_LIBDIR" /usr/lib/librexec; do
-        if [ -e "$libdir/librexec.sh" ]; then
-            . "$libdir/librexec.sh"
-            lib_rexec_loaded="true"
-            break
-        fi
-    done
-
-    if [ "$lib_rexec_loaded" != "true" ]; then
-        >&2 echo
-        >&2 echo "E: Couldn't find librexec! Make sure you install librexec before proceeding. (Note: you"
-        >&2 echo "   can set the directory to search for librexec using the \`LIBREXEC_DIR\` environment"
-        >&2 echo "   variable.)"
-        >&2 echo
-        exit 10
-    fi
-fi
 
 CONFFILE_NAME="peekaygee.json"
+SELF="$(basename "$0")"
 
 
 function echo_push_usage() {
     echo
     echo "SYNOPSIS"
-    echo "      $(basename "$0") [remote]"
+    echo "      $SELF [remote]"
     echo
     echo "DESCRIPTION"
     echo "      Push one or more packages (found using global and repo-specific config files)"
@@ -63,7 +23,9 @@ function echo_push_usage() {
     echo
 }
 
+
 # Loop to gather options
+VERBOSITY=0
 while [ "$#" -gt 0 ]; do
     case "$1" in
         -h|--help)
@@ -71,9 +33,14 @@ while [ "$#" -gt 0 ]; do
             exit
         ;;
 
+        -q) VERBOSITY=-1; shift ;;
+        -v) !((VERBOSITY++)); shift ;;
+        -vv) VERBOSITY=2; shift ;;
+        -vvv) VERBOSITY=3; shift ;;
+
         --version)
             echo
-            echo "$(basename "$0") version $PKG_VERSION"
+            echo "$SELF version $PKG_VERSION"
             echo
             echo "See readme and license information, file bug reports, and view source code at"
             echo "https://github.com/kael-shipman/peekaygee"
@@ -107,9 +74,73 @@ if [ -z ${REMOTE+x} ]; then
 fi
 
 
+# Load libraries
+
+# Load libpeekaygee
+if [ -z "$D" ]; then
+    D="$(dirname "$(readlink -f "$0")")"
+    for libdir in "$D" "$PEEKAYGEE_LIBDIR" /usr/lib/peekaygee; do
+        if [ -e "$libdir/libpeekaygee.sh" ]; then
+            . "$libdir/libpeekaygee.sh"
+            lib_loaded=true
+            break
+        fi
+    done
+fi
+if [ "$lib_loaded" != "true" ]; then
+    >&2 echo
+    >&2 echo "E: Couldn't find peekaygee libraries! Are you sure you've installed"
+    >&2 echo "   peekaygee correctly?"
+    >&2 echo
+    exit 5
+fi
+
+# Load librexec
+if [ "$lib_rexec_loaded" != "true" ]; then
+    say 1 "Loading librexec"
+    if [ -z "$LIBREXEC_DIR" ]; then 
+        say 1 "LIBREXEC_DIR not set. Setting..."
+        LIBREXEC_DIR="$(readlink -f "$(dirname "$(readlink -f "$0")")/../../librexec/src")" \
+        || \
+        LIBREXEC_DIR=
+        say 2 "LIBREXEC_DIR set to '$LIBREXEC_DIR'"
+    fi
+    for libdir in "$LIBREXEC_DIR" "$REXEC_LIBDIR" /usr/lib/librexec; do
+        say 3 "Checking for librexec at '$libdir/librexec.sh'"
+        if [ -e "$libdir/librexec.sh" ]; then
+            say 3 "Found. Loading librexec"
+            . "$libdir/librexec.sh"
+            lib_rexec_loaded="true"
+            break
+        else
+            say 3 "Not found."
+        fi
+    done
+
+    if [ "$lib_rexec_loaded" != "true" ]; then
+        >&2 echo
+        >&2 echo "E: Couldn't find librexec! Make sure you install librexec before proceeding. (Note: you"
+        >&2 echo "   can set the directory to search for librexec using the \`LIBREXEC_DIR\` environment"
+        >&2 echo "   variable.)"
+        >&2 echo
+        exit 10
+    else
+        say 1 "librexec loaded"
+    fi
+else
+    say 1 "librexec already loaded"
+fi
+
+
+say 0 "Attempting to push packages to '$REMOTE'"
+say 0
+
+
 # Validate config
 if ! config_jq '.' >/dev/null; then
     exit "${PIPESTATUS[0]}"
+else
+    say 1 "Config loaded"
 fi
 
 
@@ -121,8 +152,11 @@ if ! config_jq -e '.remotes."'$REMOTE'"' >/dev/null; then
     >&2 echo "   files $(find_config_files))"
     >&2 echo
     exit 8
+else
+    say 1 "Remote '$REMOTE' exists in config"
 fi
 REMOTE_PATH="$(config_jq -r '.remotes."'$REMOTE'".url')"
+say 2 "Remote path: '$REMOTE_PATH'"
 
 # Make sure peekaygee-archive is installed
 if ! rexec "$REMOTE_PATH" "command -v peekaygee-archive &>/dev/null"; then
@@ -131,14 +165,19 @@ if ! rexec "$REMOTE_PATH" "command -v peekaygee-archive &>/dev/null"; then
     >&2 echo "   install peekaygee-archive on the remote before continuing."
     >&2 echo
     exit 11
+else
+    say 1 "peekaygee-archive is installed on remote '$REMOTE'"
 fi
 
 # Make sure archive is initialized
+say 2 "Initializing archive on remote '$REMOTE'"
 if ! rexec "$REMOTE_PATH" 'peekaygee-archive init "::path::"'; then
     >&2 echo
     >&2 echo "E: Couldn't initialize '$REMOTE_PATH'. Can't continue."
     >&2 echo
-    continue
+    exit 12
+else
+    say 2 "Remote initialized"
 fi
 
 
@@ -151,17 +190,23 @@ if [ -z "$SEARCH_DIRS" ]; then
     >&2 echo "   to search for packages."
     >&2 echo
     exit 9
+else
+    say 3 "Search dirs: '$(echo "$SEARCH_DIRS" | tr $'\30' ' ')'"
 fi
 
 IFS=$'\30'
+PKGCNT=0
 for prf in $(config_jq -r '.packages | keys | join("'$'\30''")'); do
+    say 1 "Processing package profile '$prf'"
     prfconf="$(config_jq ".packages.\"$prf\"")"
 
-    echo "$prf"
     # Accepting null allows us to unset previously set package profiles
     if [ "$prfconf" == "null" ]; then
+        say 2 "Profile '$prf' has been overridden with 'null'. Skipping."
         continue
     fi
+
+    say 2 "Profile '$prf': $prfconf"
 
     TYPE="$(echo $prfconf | jq -r '.type')"
     MATCH="$(echo $prfconf | jq -r '.match')"
@@ -169,6 +214,7 @@ for prf in $(config_jq -r '.packages | keys | join("'$'\30''")'); do
     OPTIONS="$(echo $prfconf | jq '.options')"
 
     if [ "$VISIBILITY" == "null" ]; then
+        say 3 "Visibility null; defaulting to 'public'"
         VISIBILITY=public
     elif [ "$VISIBILITY" != "public" ] && [ "$VISIBILITY" != "private" ]; then
         >&2 echo
@@ -177,49 +223,83 @@ for prf in $(config_jq -r '.packages | keys | join("'$'\30''")'); do
         >&2 echo
         continue
     fi
-    if [ "$OPTIONS" == "null" ]; then
-        OPTIONS="{}"
-    fi
 
-    declare -a PKGS
+    PKGS=
+    say 2 "Searching for packages...." 
     for d in "$SEARCH_DIRS"; do
         if [ ! -d "$d" ]; then
+            >&2 echo "W: Search directory '$d' is not a directory. Skipping...."
             continue
         fi
         while read pkg; do
-            PKGS["${#PKGS[@]}"]="$pkg"
+            say 3 "Adding package '$pkg' to list"
+            if [ -n "$PKGS" ]; then
+                PKGS="$PKGS"$'\30'
+            fi
+            PKGS="${PKGS}$pkg"
         done < <(find "$d" -type f | egrep "$MATCH")
     done
 
-    #echo "Type: $TYPE"
-    #echo "Match: $MATCH"
-    #echo "Visibility: $VISIBILITY"
-    #echo "Options: $OPTIONS"
-    #echo "Packages: ${PKGS[@]}"
+    say 2
+    say 2 "Ready to push packages"
+    say 2
+    say 2 "Type: $TYPE"
+    say 2 "Match: $MATCH"
+    say 2 "Visibility: $VISIBILITY"
+    say 2 "Options: $OPTIONS"
+    say 2 "Packages: $(echo "$PKGS" | tr $'\30' ' ')"
+    say 2
 
     if ! rexec "$REMOTE_PATH" "peekaygee-archive supports '$TYPE'" >/dev/null; then
         >&2 echo
         >&2 echo "E: Remote '$REMOTE' doesn't support archive type '$TYPE'. Skipping the following packages:"
         >&2 echo
-        >&2 echo "   $(echo "${PKGS[@]}" | sed 's/ /\n   /g')"
+        >&2 echo "   $(echo "$PKGS" | sed 's/'$'\30''/\n   /g')"
         >&2 echo
         continue
+    else
+        say 2 "Remote supports package type '$TYPE'"
     fi
 
-    if ! rsync ${PKGS[@]} "$REMOTE_PATH/incoming/$VISIBILITY/"; then
-        >&2 echo
-        >&2 echo "E: Couldn't push packages to remote '$REMOTE' at '$REMOTE_PATH'"
-        >&2 echo
-        continue
-    fi
+    for pkg in $PKGS; do
+        say 0 "   - pushing '$pkg' to $VISIBILITY archive..."
+        if ! rsync -u "$pkg" "$REMOTE_PATH/incoming/$VISIBILITY/"; then
+            >&2 echo
+            >&2 echo "     E: Couldn't push package '$pkg' to remote '$REMOTE' at '$REMOTE_PATH'"
+            >&2 echo
+        else
+            !((PKGCNT++))
+            if [ "$OPTIONS" != "null" ]; then
+                optsfile="$(basename "$pkg").opts"
+                say 1 "  - creating options file '$optsfile'"
+                if ! rexec "$REMOTE_PATH" "echo '$OPTIONS' > ::path::/incoming/$VISIBILITY/$optsfile"; then
+                    >&2 echo
+                    >&2 echo "     E: Couldn't create options file for package '$pkg'. Rolling back..."
+                    >&2 echo
+                    rexec "$REMOTE_PATH" "rm ::path::/incoming/$VISIBILITY/$(basename "$pkg")" || true
+                fi
+            else
+                say 2 "No options file created."
+            fi
+        fi
+    done
 done
 unset IFS
 
-# Now that all packages have been uploaded, update the archive
-if ! rexec "$REMOTE_PATH" 'peekaygee-archive update "::path::"'; then
-    >&2 echo
-    >&2 echo "E: Remote update failed. Packages may not be published."
-    >&2 echo
-    exit 30
+say 0
+if [ "$PKGCNT" -gt 0 ]; then
+    say 0 "Pushed $PKGCNT packages; now calling update on remote...."
+
+    # Now that all packages have been uploaded, update the archive
+    if ! rexec "$REMOTE_PATH" 'peekaygee-archive update "::path::"'; then
+        >&2 echo
+        >&2 echo "E: Remote update failed. Packages may not be published."
+        >&2 echo
+        exit 30
+    else
+        say 0 "Update successful. Packages pushed."
+    fi
+else
+    say 0 "Nothing pushed. All done."
 fi
 
