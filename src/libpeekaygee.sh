@@ -1,5 +1,7 @@
 #!/bin/bash
 
+set -e
+
 function find_config_files() {
     if [ -z "$CONFFILE_NAME" ]; then
         >&2 echo
@@ -37,21 +39,31 @@ function find_config_files() {
 function get_merged_config() {
     if [ -z "$MERGED_CONFIG" ]; then
         find_config_files >/dev/null
-        if [ "${#CONFIG_FILES[@]}" -eq 1 ]; then
-            MERGED_CONFIG="$(jq -c "." "${CONFIG_FILES[@]}")"
-        else
-            if ! MERGED_CONFIG="$(jq -cs ".[0] * .[1]" ${CONFIG_FILES[@]})"; then
-                >&2 echo
-                >&2 echo "E: Problems merging config! Can't continue."
-                >&2 echo
-                exit 92
-            fi
+        local i=1
+        local q=".[0]"
+        while [ "$i" -lt "${#CONFIG_FILES[@]}" ]; do
+            q="$q * .[$i]"
+            !((i++))
+        done
+        if ! MERGED_CONFIG="$(jq -cs "$q" ${CONFIG_FILES[@]})"; then
+            >&2 echo
+            >&2 echo "E: Problems merging config! Can't continue."
+            >&2 echo
+            exit 92
         fi
     fi
     echo "$MERGED_CONFIG"
 }
 
 function config_jq() {
-    echo "$(get_merged_config | jq "$@")"
+    if ! get_merged_config &>/dev/null; then
+        exit "${PIPESTATUS[0]}"
+    fi
+    declare -a args
+    while [ "$#" -gt 0 ]; do
+        args+=("$1")
+        shift
+    done
+    echo "$MERGED_CONFIG" | jq "${args[@]}"
 }
 

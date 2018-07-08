@@ -107,12 +107,18 @@ if [ -z ${REMOTE+x} ]; then
 fi
 
 
+# Validate config
+if ! config_jq '.' >/dev/null; then
+    exit "${PIPESTATUS[0]}"
+fi
+
+
 # Check config to make sure remote exists
 if ! config_jq -e '.remotes."'$REMOTE'"' >/dev/null; then
     >&2 echo_push_usage
     >&2 echo
     >&2 echo "E: '$REMOTE' does not appear to be a configured remote. (Checked in config"
-    >&2 echo "   files $(find_config_files)"
+    >&2 echo "   files $(find_config_files))"
     >&2 echo
     exit 8
 fi
@@ -138,7 +144,7 @@ fi
 
 # All good now. Find packages, verify acceptability, and push to remote.
 
-SEARCH_DIRS="$(config_jq -r '."build-dirs" | join("%")' 2>/dev/null)"
+SEARCH_DIRS="$(config_jq -r '."build-dirs" | join("'$'\30''")' 2>/dev/null)"
 if [ -z "$SEARCH_DIRS" ]; then
     >&2 echo
     >&2 echo "E: You must specify a 'build-dirs' key in your config that contains an array of build directories"
@@ -147,9 +153,16 @@ if [ -z "$SEARCH_DIRS" ]; then
     exit 9
 fi
 
-IFS="%"
-for prf in "$(config_jq -r '.packages | keys | join("%")')"; do
-    prfconf="$(config_jq '.packages."'$prf'"')"
+IFS=$'\30'
+for prf in $(config_jq -r '.packages | keys | join("'$'\30''")'); do
+    prfconf="$(config_jq ".packages.\"$prf\"")"
+
+    echo "$prf"
+    # Accepting null allows us to unset previously set package profiles
+    if [ "$prfconf" == "null" ]; then
+        continue
+    fi
+
     TYPE="$(echo $prfconf | jq -r '.type')"
     MATCH="$(echo $prfconf | jq -r '.match')"
     VISIBILITY="$(echo $prfconf | jq -r '.visibility')"
@@ -203,5 +216,10 @@ done
 unset IFS
 
 # Now that all packages have been uploaded, update the archive
-rexec "$REMOTE_PATH" 'peekaygee-archive update "::path::"'
+if ! rexec "$REMOTE_PATH" 'peekaygee-archive update "::path::"'; then
+    >&2 echo
+    >&2 echo "E: Remote update failed. Packages may not be published."
+    >&2 echo
+    exit 30
+fi
 
