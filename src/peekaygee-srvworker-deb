@@ -1,0 +1,212 @@
+#!/bin/bash
+
+set -e
+
+export PKG_VERSION="::VERSION::"
+
+function echo_usage() {
+    echo
+    echo "SYNOPSIS"
+    echo "      $(basename "$0") [command] [command-options]"
+    echo
+    echo "DESCRIPTION"
+    echo "      \`peekaygee-srvworker-deb\` is a \`peekaygee\` server-side worker program that handles archive"
+    echo "      maintenance tasks for apt/deb package archives."
+    echo
+    echo "COMMANDS"
+    echo "      add [archive-path] [debfile] [json-options-str]"
+    echo "          Adds package file [debfile] to the peekaygee archive at [archive-path], using [json-options-str]"
+    echo "          to determine certain characteristics"
+    echo
+    echo "      remove [archive-path] [pkg-spec] [json-options-str]"
+    echo "          removes all packages matching [pkg-spec] from the peekaygee archive at [archive-path], using"
+    echo "          [json-options-str] to determine certain characteristics"
+    echo
+    echo "GLOBAL OPTIONS"
+    echo "      -h|--help"
+    echo "          Show this help text. Note: you can also pass --help|-h to any subcommand"
+    echo "          to see more information about each."
+    echo
+    echo "      --version"
+    echo "          Display version information"
+    echo
+    echo
+    echo
+}
+
+# Initial loop to gather global options and main command
+if [ -z "$VERBOSITY" ]; then VERBOSITY=0; fi
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        add|remove)
+            COMMAND="$1"
+            shift
+            break
+        ;;
+
+        -q) VERBOSITY=-1; shift ;;
+        -v) !((VERBOSITY++)); shift ;;
+        -vv) VERBOSITY=2; shift ;;
+        -vvv) VERBOSITY=3; shift ;;
+
+        -h|--help)
+            echo_usage
+            exit
+        ;;
+
+        --version)
+            echo
+            echo "$(basename "$0") version $PKG_VERSION"
+            echo
+            echo "See readme and license information, file bug reports, and view source code at"
+            echo "https://github.com/kael-shipman/peekaygee"
+            echo
+            exit
+        ;;
+
+        *)
+            >&2 echo_usage
+            >&2 echo
+            >&2 echo "E: You've passed an invalid command or option: $1"
+            >&2 echo
+            exit 1
+        ;;
+    esac
+done
+export VERBOSITY
+
+
+# Validate dependencies
+if ! command -v reprepro &>/dev/null; then
+    >&2 echo
+    >&2 echo "E: Required dependency reprepro appears to be missing. Can't continue."
+    >&2 echo
+    exit 19
+fi
+
+
+# Validate empties
+if [ -z ${COMMAND+x} ]; then
+    >&2 echo_usage
+    >&2 echo
+    >&2 echo "E: You haven't passed a command!"
+    >&2 echo
+    exit 3
+fi
+
+
+# Load libraries
+D="$(dirname "$(readlink -f "$0")")"
+for libdir in "$D" "$PEEKAYGEE_LIBDIR" /usr/lib/peekaygee; do
+    if [ -e "$libdir/libpeekaygee-srvworker.sh" ]; then
+        . "$libdir/libpeekaygee-srvworker.sh"
+        lib_loaded=true
+        break
+    fi
+done
+if [ "$lib_loaded" != "true" ]; then
+    >&2 echo
+    >&2 echo "E: Couldn't find peekaygee libraries! Are you sure you've installed"
+    >&2 echo "   peekaygee correctly?"
+    >&2 echo
+    exit 1
+fi
+
+
+# Execute subcommand logic
+
+ARCHIVE_TYPE=deb
+
+if [ "$COMMAND" == "add" ]; then
+    # Defines ARCHIVE, PKGFILE, OPTIONS, and TARG_ARCHIVE, and throws appropriate errors
+    peekaygee_prep_srvworker_add "$1" "$2" "$3" '\.deb$'
+
+    if [ ! -e "$TARG_ARCHIVE/conf/distributions" ]; then
+        >&2 echo
+        >&2 echo "E: It looks like you haven't yet configured your reprepro archive at '$TARG_ARCHIVE'."
+        >&2 echo "   You must configure this archive by creating a \`distributions\` file at"
+        >&2 echo "   '$TARG_ARCHIVE/conf/distributions' before automating pushes with peekaygee."
+        >&2 echo
+        exit 21
+    fi
+
+    say 2
+    say 2 "Environment:"
+    say 2
+    say 2 "Archive: $ARCHIVE"
+    say 2 "Debfile: $PKGFILE"
+    say 2 "Options: $OPTIONS"
+    say 2 "Target archive: $TARG_ARCHIVE"
+    say 2
+
+    DISTS=()
+    if [ -z "$OPTIONS" ] || ! echo "$OPTIONS" | jq -e '.releases' >/dev/null || [ "$(echo "$OPTIONS" | jq -r '.releases | length')" -eq 0 ]; then
+        >&2 echo
+        >&2 echo "E: Need at least one distribution (xenial, bionic, etc.) defined in the options \`releases\` array."
+        >&2 echo "   (Options: $OPTIONS)"
+        >&2 echo
+        exit 40
+    fi
+
+    # Debian archives are predicated on releases (xenial, bionic, etc.). Thus, each package must be assigned at least one dist
+    while read -r -d $'\x1e' DIST || [[ $DIST ]]; do
+        say 1 " - adding $PKGFILE to $DIST"
+        if OUT="$(reprepro -b "$TARG_ARCHIVE" includedeb "$DIST" "$PKGFILE" 2>&1)"; then
+            say 2 " - added successfully"
+        else
+            EXITCODE="$?"
+            say 2 " - handling reprepro error"
+
+            # If it's a duplicate package complaint, force or skip
+            if echo "$OUT" | grep -Fq "Already existing files"; then
+                say 2 " - duplicate package exists in archive"
+
+                # If we've asked to force packages in this repo, then remove the old and add the new
+                if echo "$OPTIONS" | jq -e '.force' &>/dev/null; then
+                    say 0 " - W: duplicate package exists; forcing removal of old package and replacing with new one"
+
+                    # Get package info
+                    mapfile -t PKGINFO < <(dpkg-deb -I "$PKGFILE" | egrep '^ *Package:|^ *Version:' | sed -r 's/^[^:]+: (.*)$/\1/')
+                    say 3 " - package info: ${PKGINFO[@]}"
+
+                    # Removing
+                    say 3 " - removing package"
+                    reprepro -b "$TARG_ARCHIVE" removefilter "$DIST" "Package (== ${PKGINFO[0]}) , \$Version (== ${PKGINFO[1]})" >/dev/null
+                    if ! reprepro -b "$TARG_ARCHIVE" includedeb "$DIST" "$PKGFILE" >/dev/null; then
+                        >&2 echo
+                        >&2 echo "E: Can't force inclusion of package. Manual intervention required :(."
+                        >&2 echo
+                        exit 45
+                    fi
+
+                # Not forcing -- skip instead
+                else
+                    say 2 " - not forcing (skipping)"
+                    say 0 " - W: Package $(basename "$PKGFILE") already exists in repo. Use \`force\` option to forcibly replace it. Skipping"
+                fi
+
+            # Otherwise, maybe the repo isn't configured correctly?
+            elif [ "$EXITCODE" -eq 249 ]; then
+                >&2 echo
+                >&2 echo "E: reprepro can't find a definition for the '$DIST' distribution. You may need to"
+                >&2 echo "   edit your distributions file at '$TARG_ARCHIVE/conf/distributions'."
+                >&2 echo
+                exit "$EXITCODE"
+
+            # Otherwise, not sure what the error is. Exit dirty.
+            else
+                >&2 echo
+                >&2 echo "E: reprepro reported an error:"
+                >&2 echo
+                >&2 echo "$OUT"
+                exit "$EXITCODE"
+            fi
+        fi
+    done < <(echo "$OPTIONS" | jq -jc '.releases | join("\u001e")')
+
+elif [ "$COMMAND" == "remove" ]; then
+    >&2 echo "E: Not yet implemented"
+    exit 507
+fi
+
+

@@ -25,7 +25,7 @@ function echo_push_usage() {
 
 
 # Loop to gather options
-VERBOSITY=0
+if [ -z "$VERBOSITY" ]; then VERBOSITY=0; fi
 while [ "$#" -gt 0 ]; do
     case "$1" in
         -h|--help)
@@ -62,7 +62,21 @@ while [ "$#" -gt 0 ]; do
         ;;
     esac
 done
+export VERBOSITY
 
+# Rework verbosity for sub-command
+v=
+i="$VERBOSITY"
+while [ "$i" -gt 0 ]; do
+    if [ -z "$v" ]; then
+        v="-"
+    fi
+    v="${v}v"
+    !((i--))
+done
+if [ "$VERBOSITY" -eq -1 ]; then
+    v="-q"
+fi
 
 # Validate empties
 if [ -z ${REMOTE+x} ]; then
@@ -137,11 +151,8 @@ say 0
 
 
 # Validate config
-if ! config_jq '.' >/dev/null; then
-    exit "${PIPESTATUS[0]}"
-else
-    say 1 "Config loaded"
-fi
+require_config
+check_config
 
 
 # Check config to make sure remote exists
@@ -155,7 +166,7 @@ if ! config_jq -e '.remotes."'$REMOTE'"' >/dev/null; then
 else
     say 1 "Remote '$REMOTE' exists in config"
 fi
-REMOTE_PATH="$(config_jq -r '.remotes."'$REMOTE'".url')"
+REMOTE_PATH="$(config_jq -j '.remotes."'$REMOTE'".url')"
 say 2 "Remote path: '$REMOTE_PATH'"
 
 # Make sure peekaygee-archive is installed
@@ -171,7 +182,7 @@ fi
 
 # Make sure archive is initialized
 say 2 "Initializing archive on remote '$REMOTE'"
-if ! rexec "$REMOTE_PATH" 'peekaygee-archive init "::path::"'; then
+if ! rexec "$REMOTE_PATH" "peekaygee-archive $v init \"::path::\""; then
     >&2 echo
     >&2 echo "E: Couldn't initialize '$REMOTE_PATH'. Can't continue."
     >&2 echo
@@ -183,7 +194,7 @@ fi
 
 # All good now. Find packages, verify acceptability, and push to remote.
 
-SEARCH_DIRS="$(config_jq -r '."build-dirs" | join("'$'\30''")')"
+SEARCH_DIRS="$(config_jq -j '."build-dirs" | join("\u001e")')"
 if [ -z "$SEARCH_DIRS" ]; then
     >&2 echo
     >&2 echo "E: You must specify a 'build-dirs' key in your config that contains an array of build directories"
@@ -191,20 +202,19 @@ if [ -z "$SEARCH_DIRS" ]; then
     >&2 echo
     exit 9
 else
-    say 3 "Search dirs: '$(echo "$SEARCH_DIRS" | tr $'\30' ' ')'"
+    say 3 "Search dirs: '$(echo "$SEARCH_DIRS" | tr $'\x1e' ' ')'"
 fi
 
-PRESERVE_PUSHED="$(config_jq -r '."preserve-pushed"')"
+PRESERVE_PUSHED="$(config_jq -j '."preserve-pushed"')"
 if [ "$PRESERVE_PUSHED" != "true" ]; then
     say 3 "Preserve pushed (raw value): $PRESERVE_PUSHED"
     PRESERVE_PUSHED="false"
 fi
 say 2 "Preserve pushed packages: $PRESERVE_PUSHED"
 
-IFS=$'\30'
 PKGCNT=0
 ERRORS=0
-for prf in $(config_jq -r '.packages | keys | join("'$'\30''")'); do
+while read -r -d $'\x1e' prf || [[ $prf ]]; do
     say 1 "Processing package profile '$prf'"
     prfconf="$(config_jq ".packages.\"$prf\"")"
 
@@ -217,10 +227,11 @@ for prf in $(config_jq -r '.packages | keys | join("'$'\30''")'); do
     say 2 "Profile '$prf': $prfconf"
 
     # Set other variables
-    TYPE="$(echo $prfconf | jq -r '.type')"
-    MATCH="$(echo $prfconf | jq -r '.match')"
-    VISIBILITY="$(echo $prfconf | jq -r '.visibility')"
-    OPTIONS="$(echo $prfconf | jq '.options')"
+    TYPE="$(echo "$prfconf" | jq -j '.type')"
+    MATCH="$(echo "$prfconf" | jq -j '.match')"
+    VISIBILITY="$(echo "$prfconf" | jq -j '.visibility')"
+    OPTIONS="$(echo "$prfconf" | jq -jc '.options')"
+    REMOTE_OPTIONS="$(config_jq -jc '.remotes."'$REMOTE'"."package-opts"')"
 
     # Default to "public" visibility, but verify value
     if [ "$VISIBILITY" == "null" ]; then
@@ -235,6 +246,13 @@ for prf in $(config_jq -r '.packages | keys | join("'$'\30''")'); do
         continue
     fi
 
+    # Combine OPTIONS and REMOTE_OPTIONS
+    if [ "$OPTIONS" == "null" ]; then OPTIONS="{}"; fi
+    if [ "$REMOTE_OPTIONS" == "null" ]; then REMOTE_OPTIONS="{}"; fi
+    OPTIONS="$(echo "[$OPTIONS, $REMOTE_OPTIONS]" | jq -c '.[0] * .[1]')"
+    if [ "$OPTIONS" == "null" ]; then OPTIONS=""; fi
+
+
     # Search build dirs for matching packages
     PKGS=
     say 2 "Searching for packages...." 
@@ -245,10 +263,7 @@ for prf in $(config_jq -r '.packages | keys | join("'$'\30''")'); do
         fi
         while read pkg; do
             say 3 "Adding package '$pkg' to list"
-            if [ -n "$PKGS" ]; then
-                PKGS="$PKGS"$'\30'
-            fi
-            PKGS="${PKGS}$pkg"
+            PKGS="${PKGS}$pkg"$'\x1e'
         done < <(find "$d" -type f | egrep "$MATCH")
     done
 
@@ -259,24 +274,22 @@ for prf in $(config_jq -r '.packages | keys | join("'$'\30''")'); do
     say 2 "Match: $MATCH"
     say 2 "Visibility: $VISIBILITY"
     say 2 "Options: $OPTIONS"
-    say 2 "Packages: $(echo "$PKGS" | tr $'\30' ' ')"
+    say 2 "Packages: $(echo "$PKGS" | tr $'\x1e' ' ')"
     say 2
 
     # Make sure there are packages to push
     if [ -z "$PKGS" ]; then
-        >&2 echo
-        >&2 echo "W: No packages found for type '$TYPE'"
-        >&2 echo
+        say 1 "W: No packages found for type '$TYPE'"
         continue
     fi
 
     # Make sure the remote supports this type of package
     say 3 "Checking remote for support or '$TYPE' packages"
-    if ! rexec "$REMOTE_PATH" "peekaygee-archive supports '$TYPE'" >/dev/null; then
+    if ! rexec "$REMOTE_PATH" "peekaygee-archive $v supports '$TYPE'" >/dev/null; then
         >&2 echo
         >&2 echo "E: Remote '$REMOTE' doesn't support archive type '$TYPE'. Skipping the following packages:"
         >&2 echo
-        >&2 echo "   $(echo "$PKGS" | sed 's/'$'\30''/\n   /g')"
+        >&2 echo "   $(echo "$PKGS" | sed 's/'$'\x1e''/\n   /g')"
         >&2 echo
         !((ERRORS++))
         continue
@@ -285,7 +298,7 @@ for prf in $(config_jq -r '.packages | keys | join("'$'\30''")'); do
     fi
 
     # Push each package up, creating an options file for it also, if applicable
-    for pkg in $PKGS; do
+    while read -r -d $'\x1e' pkg || [[ $pkg ]]; do
         success="true"
         say 0 "   - pushing '$pkg' to $VISIBILITY archive..."
         if ! rsync -u "$pkg" "$REMOTE_PATH/incoming/$VISIBILITY/"; then
@@ -321,34 +334,33 @@ for prf in $(config_jq -r '.packages | keys | join("'$'\30''")'); do
                 fi
             fi
         fi
-    done
-done
-unset IFS
+    done < <(echo "$PKGS")
+done < <(config_jq -jc '.packages | keys | join("\u001e")')
 
 
 # Done pushing, now update the remote and report
-say 0
 if [ "$PKGCNT" -gt 0 ]; then
     err=
     if [ "$ERRORS" -gt 0 ]; then
         err=" (with $ERRORS errors)"
     fi
+    say 0
     say 0 "Pushed $PKGCNT packages; now calling update on remote...."
 
     # Now that all packages have been uploaded, update the archive
-    if ! rexec "$REMOTE_PATH" 'peekaygee-archive update "::path::"'; then
+    if ! rexec -t "$REMOTE_PATH" "peekaygee-archive $v update \"::path::\""; then
         >&2 echo
         >&2 echo "E: Remote update failed. Packages may not be published."
         >&2 echo
         exit 30
     else
-        say 0 "Update successful. Packages pushed."
+        say 0 "Packages successfully published"
     fi
 else
     if [ "$ERRORS" -gt 0 ]; then
-        say 0 "Nothing pushed, although there were $ERRORS errors."
+        say 0 "Nothing pushed, although there were $ERRORS errors"
     else
-        say 0 "Nothing pushed; all done."
+        say 0 "Nothing pushed; all done"
     fi
 fi
 

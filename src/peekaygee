@@ -5,6 +5,7 @@ set -e
 
 export PKG_VERSION="::VERSION::"
 SELF="$(basename "$0")"
+CONFFILE_NAME="peekaygee.json"
 
 
 function echo_usage() {
@@ -31,6 +32,9 @@ function echo_usage() {
     echo "          Delete all older versions of packages on [remote], optionally matching"
     echo "          [pkg-spec], saving the most recent [num-versions] versions"
     echo
+    echo "      show-remotes"
+    echo "          show all configured remotes and (if -v specified) their urls"
+    echo
     echo "GLOBAL OPTIONS"
     echo "      -h|--help"
     echo "          Show this help text. Note: you can also pass --help|-h to any subcommand"
@@ -45,10 +49,10 @@ function echo_usage() {
 
 
 # Initial loop to gather global options and main command
-VERBOSITY=0
+if [ -z "$VERBOSITY" ]; then VERBOSITY=0; fi
 while [ "$#" -gt 0 ]; do
     case "$1" in
-        push|delete|prune|list)
+        push|delete|prune|list|show-remotes)
             COMMAND="$1"
             shift
             break
@@ -83,7 +87,7 @@ while [ "$#" -gt 0 ]; do
         ;;
     esac
 done
-
+export VERBOSITY
 
 # Load libraries
 
@@ -104,30 +108,13 @@ if [ "$lib_loaded" != "true" ]; then
     exit 1
 fi
 
-say 1 "Arguments gathered and libraries loaded"
+say 2 "Arguments gathered and libraries loaded"
 
 # Rework arguments into an array for passing to sub-command
 args=()
 for arg in $@; do
     args+=("$arg");
 done
-
-# Rework verbosity for sub-command
-v=
-i="$VERBOSITY"
-while [ "$i" -gt 0 ]; do
-    if [ -z "$v" ]; then
-        v="-"
-    fi
-    v="${v}v"
-    !((i--))
-done
-if [ "$VERBOSITY" -eq -1 ]; then
-    v="-q"
-fi
-if [ -n "$v" ]; then
-    args+=("$v")
-fi
 
 
 # Info
@@ -148,21 +135,29 @@ fi
 
 # Run subcommand
 
-say 1 "Running sub-command"
+say 2 "Running sub-command $COMMAND"
 
-# See if it's local
-CMD="$D/peekaygee-$COMMAND"
-if [ ! -x "$CMD" ]; then
-    # Otherwise, see if it's on the path
-    if ! CMD="$(command -v "peekaygee-$COMMAND")"; then
-        >&2 echo
-        >&2 echo "E: Couldn't find subcommand peekaygee-$COMMAND! Are you sure peekaygee"
-        >&2 echo "   is properly installed?"
-        >&2 echo
-        exit 4
+# Show remotes
+if [ "$COMMAND" == "show-remotes" ]; then
+    require_config
+    check_config
+    show_remotes
+
+# Other commands
+else
+    # See if it's local
+    CMD="$D/peekaygee-$COMMAND"
+    if [ ! -x "$CMD" ]; then
+        # Otherwise, see if it's on the path
+        if ! CMD="$(command -v "peekaygee-$COMMAND")"; then
+            >&2 echo
+            >&2 echo "E: Couldn't find subcommand peekaygee-$COMMAND! Are you sure peekaygee"
+            >&2 echo "   is properly installed?"
+            >&2 echo
+            exit 4
+        fi
     fi
+
+    "$CMD" ${args[@]}
 fi
-
-"$CMD" ${args[@]}
-
 

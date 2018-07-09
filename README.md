@@ -188,3 +188,113 @@ And here's an explanation of some of the files and directories:
 
 This is the structure that's created with `peekaygee-archive init ([path])` (minus the vendor-specific directories, which are created the first time a vendor worker runs on the archive).
 
+
+## Configuration Options
+
+### peekaygee.json
+
+This suite of config files controls behavior of the `peekaygee` client (used on your local computer to manage remote repositories). `peekaygee.json` files are searched for in the following locations (4 overrides 3, etc...):
+
+1. `/etc/peekaygee/peekaygee.json`
+2. `/etc/peekaygee/peekaygee.json.d/` (filenames under this directory are arbitrary)
+3. `~/.config/peekaygee/peekaygee.json`
+4. `$PWD/peekaygee.json`
+
+Here's a full example using every possible config option (at the time of this writing):
+
+```json
+{
+    "remotes": {
+        "production": {
+            "url": "my-server.com:/srv/www/packages.my-server.com",
+            "package-opts": {
+                "apt": {
+                    "force": true
+                }
+            }
+        }
+    },
+    "build-dirs": ["build"],
+    "packages": {
+        "deb": {
+            "type": "deb",
+            "match": ".*\\.deb$",
+            "visibility": "private",
+            "options": {
+                "dists": ["bionic","xenial"]
+            }
+        }
+    }
+}
+```
+
+Explanations:
+
+>
+> **Note:** options marked "required" need to be present in _some_ config file, not _all_ config files.
+>
+
+**remotes** (required) -- An object containing remote archive specifications.
+
+**remotes.[name].url** (required) -- The url of the remote. May be a local path or an ssh-formatted remote path.
+
+**remotes.[name].package-opts** (optional) -- A collection of additional options to apply on a per-remote basis when pushing packages. In this example, I'm enabling "force" mode when pushing debian packages to my "production" archive, even though it is not normally enabled by the options defined in the "apt" package specification. (See `packages.[name].options` below for more details.)
+
+**build-dirs** (required) -- An array of directories to search for built files. May be relative or absolute, but must be local.
+
+**packages** (required) -- A list of package specifications. While normally keys in this list will match their "type" parameters, this is not always the case. For example, in a certain project that contains both public and private package builds, I may null out the default "deb" package specification and replace it with "deb-public" and "deb-private", using the "match" key to select the correct packages for each.
+
+**packages.[name].type** (required) -- Which type of packages match this specification. While technically this may be anything, your package server must have a `peekaygee-srvworker-[type]`
+worker application installed and in its path, and it must have config that teaches it how to handle packages of that type. Normally this will be something like `deb`, `npm`, `rpm`, etc...
+
+**packages.[name].match** (required) -- A regex used to find all packages that are governed by this package profile. This is used directly with `egrep`.
+
+**packages.[name].visibility** (optional, default "public") -- Either "public" or "private". This defines whether the package will be published in the public section or the private section of your repository.
+
+**packages.[name].options** (optional) -- This is an arbitrary, worker-specific options hash that's passed along inline to the worker on the server. It may be used for anything, but in the case of debian packages, it's used to specify the releases (`dists`) the package should be published for and whether or not to forcefully replace a package that already exists in the given version at the server. Options for this hash are not well defined or documented yet....
+
+
+### peekaygee-archive.json
+
+This suite of config files controls behavior of the `peekaygee-archive` agent (used on remote machines to manage repositories there). `peekaygee-archive.json` files are searched for in the following locations (4 overrides 3, etc...):
+
+1. `/etc/peekaygee/peekaygee-archive.json`
+2. `/etc/peekaygee/peekaygee-archive.json.d/` (filenames under this directory are arbitrary)
+3. `~/.config/peekaygee/peekaygee-archive.json`
+4. `$ARCHIVE_ROOT/peekaygee-archive.json`
+
+Here's a full example using every possible config option (at the time of this writing):
+
+```json
+{
+    "archives": [
+        {
+            "path": "/srv/www/packages.my-server.com"
+        }
+    ],
+    "packages": {
+        "deb": {
+            "type": "deb",
+            "match": ".*\\.deb$"
+        }
+    }
+}
+```
+
+You'll notice that these options are very similar to the client-side `peekaygee.json` options. Technically, these two suites of config files overlap, so configs from `peekaygee.json` that appear here are semantically identical. Explanations:
+
+>
+> **Note:** options marked "required" need to be present in _some_ config file, not _all_ config files.
+>
+
+**archives** (optional) -- An array of archives on this machine. Currently, the only property is `path`, though that may grow later. If this is not specified anywhere global, then the `peekaygee-archive update` command won't work without a specific archive given as an argument.
+
+**archives.[name].path** (required) -- The path of the archive. Required if "archives" array given, as this is the only defining property of an archive specification.
+
+**packages** (required) -- A list of package specifications. While normally keys in this list will match their "type" parameters, this is not always the case. See the same property in `peekaygee.json` for more information.
+
+**packages.[name].type** (required) -- Which type of packages match this specification. While technically this may be anything, your package server must have a `peekaygee-srvworker-[type]`
+worker application installed and in its path, and it must have config that teaches it how to handle packages of that type. Normally this will be something like `deb`, `npm`, `rpm`, etc...
+
+**packages.[name].match** (required) -- A regex used to find all packages that are governed by this package profile. This is used directly with `egrep`.
+

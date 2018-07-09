@@ -2,22 +2,6 @@
 
 set -e
 
-D="$(dirname "$(readlink -f "$0")")"
-#for libdir in "$D" "$PEEKAYGEE_LIBDIR" /usr/lib/peekaygee; do
-#    if [ -e "$libdir/libpeekaygee.sh" ]; then
-#        . "$libdir/libpeekaygee.sh"
-#        lib_loaded=true
-#        break
-#    fi
-#done
-#if [ "$lib_loaded" != "true" ]; then
-#    >&2 echo
-#    >&2 echo "E: Couldn't find peekaygee libraries! Are you sure you've installed"
-#    >&2 echo "   peekaygee correctly?"
-#    >&2 echo
-#    exit 1
-#fi
-
 export PKG_VERSION="::VERSION::"
 export CONFFILE_NAME="peekaygee-archive.json"
 
@@ -35,8 +19,8 @@ function echo_usage() {
     echo "      requested. For example, suppose \`peekaygee-archive update /srv/www/my-repo\` is called."
     echo "      \`peekaygee-archive\` will search in \`/srv/www/my-repo/incoming\` for new packages according"
     echo "      to matching rules defined in its config files, then it will call, for example,"
-    echo "      \`peekaygee-srvworker-apt add /srv/www/my-repo/incoming/public/package.deb\` to handle adding"
-    echo "      the new package to the archive."
+    echo "      \`peekaygee-srvworker-apt add \"/srv/www/my-repo/\" \"incoming/public/package.deb\"\` to handle"
+    echo "      adding the new package to the archive."
     echo
     echo "COMMANDS"
     echo "      init ([path])"
@@ -63,7 +47,160 @@ function echo_usage() {
     echo
 }
 
+function update_archive() {
+    local ARCHIVE="$1"
+
+    # Possibly initialize it first
+    if [ ! -e "$ARCHIVE/.peekaygee-version" ]; then
+        say 0 " - not yet initialized; initializing..."
+        initialize_archive "$ARCHIVE"
+    fi
+
+    # Move into it and refresh config
+    cd "$ARCHIVE"
+    say 1 " - reloading config"
+    refresh_config
+
+    # Validate config
+    if ! config_jq -e 'has("packages")' >/dev/null || [ "$(config_jq -r '.packages | keys | length')" -eq 0 ]; then
+        >&2 echo
+        >&2 echo "E: Your configuration must have a 'packages' object containing at least one package specification."
+        >&2 echo "   See https://github.com/kael-shipman/peekaygee for information on config."
+        >&2 echo
+        !((ERRORS++))
+        return 38
+    fi
+
+    # Now proceed with update
+    local PKGCNT=0
+    while read -r -d $'\x1e' prf || [[ $prf ]]; do
+        say 1 " - searching for packages matching profile '$prf'"
+        prfconf="$(config_jq -c ".packages.\"$prf\"")"
+
+        # Accepting null allows us to unset previously set package profiles
+        if [ "$prfconf" == "null" ]; then
+            say 2 " - profile '$prf' has been overridden with 'null'. Skipping."
+            continue
+        fi
+
+        say 2 " - profile '$prf': $prfconf"
+
+        # Set other variables
+        local TYPE="$(echo $prfconf | jq -r '.type')"
+        local MATCH="$(echo $prfconf | jq -r '.match')"
+
+        # Search incoming for matching packages
+        say 1 " - searching incoming for packages matching '$MATCH'"
+        local PKGS=
+        while read pkg; do
+            say 3 "Adding package '$pkg' to list"
+            PKGS="${PKGS}$pkg"$'\x1e'
+        done < <(find incoming -type f ! -name '*.opts' | egrep "$MATCH")
+
+        # Make sure there are packages to push
+        if [ -z "$PKGS" ]; then
+            say 1 " - W: No $TYPE packages found"
+            continue
+        fi
+
+        say 2
+        say 2 " - Ready to process packages"
+        say 2
+        say 2 "   - Type: $TYPE"
+        say 2 "   - Match: $MATCH"
+        say 2 "   - Packages: $(echo "$PKGS" | tr $'\x1e' ' ')"
+        say 2
+
+        # Validate
+        if ! type_supported "$TYPE" >/dev/null; then
+            >&2 echo
+            >&2 echo "E: Found packages of type '$TYPE' matching '$MATCH', but this type is currently"
+            >&2 echo "   unsupported. You may need to install the \`peekaygee-srvworker-$TYPE\` package."
+            >&2 echo
+            !((ERRORS++))
+            continue
+        else
+            say 2 " - package type supported. Proceeding."
+        fi
+
+        say 0 " - $TYPE packages found"
+        while read -r -d $'\x1e' pkg || [[ $pkg ]]; do
+            say 0 " - adding package $pkg to archive"
+            local OPTS=
+            if [ -e "$pkg.opts" ]; then
+                if ! OPTS="$(jq -c '.' "$pkg.opts")"; then
+                    >&2 echo
+                    >&2 echo "E: Options file '$pkg.opts' is not valid json. Skipping this package."
+                    >&2 echo
+                    !((ERRORS++))
+                    continue
+                fi
+            fi
+            say 3 " - calling \`peekaygee-srvworker-$TYPE add \"$ARCHIVE\" \"$pkg\" '$OPTS'\`"
+            if ! peekaygee-srvworker-$TYPE add "$ARCHIVE" "$pkg" "$OPTS"; then
+                >&2 echo " - FAILED"
+                !((ERRORS++))
+            else
+                say 1 " - success"
+                say 1 " - deleting source files"
+                rm "$pkg"* &>/dev/null
+            fi
+        done < <(echo "$PKGS")
+    done < <(config_jq -r '.packages | keys | join("\u001e")')
+
+    # Make sure we don't have anything left over
+    if [ "$(find incoming -type f | wc -l)" -gt 0 ]; then
+        >&2 echo
+        >&2 echo "W: Unhandled files found in '$ARCHIVE/incoming':"
+        >&2 echo
+        while read f; do
+            >&2 echo "  - $f"
+        done < <(find incoming -type f | sort)
+        >&2 echo
+        >&2 echo "You may need to install a specialized worker to handle these, or add a configuration that"
+        >&2 echo "describes how to handle them."
+        >&2 echo
+        !((ERRORS++))
+    fi
+
+    if [ "$ERRORS" -gt 0 ]; then
+        return 110
+    else
+         return 0
+    fi
+}
+
+function type_supported() {
+    local TYPE="$1"
+    if echo "$TYPE" | grep -q '[^A-Za-z0-9_-]'; then
+        >&2 echo
+        >&2 echo "E: Type '$TYPE' doesn't look like a real type. Is this is a mistake?"
+        >&2 echo
+        exit 4
+    fi
+
+    say 1 "Checking to see if peekaygee-srvworker-$TYPE exists"
+
+    if command -v "peekaygee-srvworker-$TYPE" &>/dev/null; then
+        say 0 "true"
+        return
+    else
+        say 0 "false"
+        return 100
+    fi
+}
+
+function initialize_archive() {
+    local ROOT="$1"
+    mkdir -p "$ROOT/srv-config"
+    mkdir -p "$ROOT"/{incoming,webroot}/{public,private}
+    echo "$PKG_VERSION" >"$ROOT/.peekaygee-version"
+
+    #TODO: Create apache and nginx vhost templates
+}
+
 # Initial loop to gather global options and main command
+if [ -z "$VERBOSITY" ]; then VERBOSITY=0; fi
 while [ "$#" -gt 0 ]; do
     case "$1" in
         init|supports|update)
@@ -71,6 +208,11 @@ while [ "$#" -gt 0 ]; do
             shift
             break
         ;;
+
+        -q) VERBOSITY=-1; shift ;;
+        -v) !((VERBOSITY++)); shift ;;
+        -vv) VERBOSITY=2; shift ;;
+        -vvv) VERBOSITY=3; shift ;;
 
         -h|--help)
             echo_usage
@@ -96,6 +238,7 @@ while [ "$#" -gt 0 ]; do
         ;;
     esac
 done
+export VERBOSITY
 
 
 # Validate empties
@@ -108,38 +251,44 @@ if [ -z ${COMMAND+x} ]; then
 fi
 
 
+# Load libraries
+D="$(dirname "$(readlink -f "$0")")"
+for libdir in "$D" "$PEEKAYGEE_LIBDIR" /usr/lib/peekaygee; do
+    if [ -e "$libdir/libpeekaygee.sh" ]; then
+        . "$libdir/libpeekaygee.sh"
+        lib_loaded=true
+        break
+    fi
+done
+if [ "$lib_loaded" != "true" ]; then
+    >&2 echo
+    >&2 echo "E: Couldn't find peekaygee libraries! Are you sure you've installed"
+    >&2 echo "   peekaygee correctly?"
+    >&2 echo
+    exit 1
+fi
+
 
 # Execute subcommand logic
 
+say 2 "Executing command $COMMAND"
+
+# Supports
+if [ "$COMMAND" == "supports" ]; then
+    type_supported "$1"
+
 # Init
-if [ "$COMMAND" == "init" ]; then
+elif [ "$COMMAND" == "init" ]; then
     ROOT="$1"
     if [ -z "$ROOT" ]; then
         ROOT="$PWD"
     fi
-    mkdir -p "$ROOT/srv-config"
-    mkdir -p "$ROOT"/{incoming,webroot}/{public,private}
 
-    #TODO: Create apache and nginx vhost templates
-
-
-
-# Supports
-elif [ "$COMMAND" == "supports" ]; then
-    TYPE="$1"
-    if echo "$TYPE" | grep -q '[^A-Za-z0-9_-]'; then
-        >&2 echo
-        >&2 echo "E: Type '$TYPE' doesn't look like a real type. Is this is a mistake?"
-        >&2 echo
-        exit 4
-    fi
-
-    if command -v "peekaygee-srvworker-$TYPE" &>/dev/null; then
-        echo "true"
-        exit
+    if [ ! -e "$ROOT" ] || [ "$(ls -A "$ROOT" | wc -l)" -eq 0 ]; then
+        say 0 "Initializing archive at '$ROOT'"
+        initialize_archive "$ROOT"
     else
-        echo "false"
-        exit 100
+        say 1 "Archive already initialized. Skpping."
     fi
 
 
@@ -149,25 +298,43 @@ elif [ "$COMMAND" == "update" ]; then
     # First argument should be a path to an archive
     ARCHIVE="$1"
     if [ -z "$ARCHIVE" ]; then
-        # If not, maybe the present working directory is an archive
-        if [ -d "$PWD/incoming" ]; then
+        # If blank, maybe the present working directory is an archive
+        if [ -e "$PWD/.peekaygee-version" ]; then
             ARCHIVE="$PWD"
         fi
     fi
 
-    # If we have a specific archivep path, then make sure it's initialized
+    ERRORS=0
+
+    # If we have a specific archive path, update that archive
     if [ -n "$ARCHIVE" ]; then
-        if [ ! -d "$ARCHIVE/incoming" ]; then
-            "$0" init "$ARCHIVE"
+        say 0 "Updating archive at '$ARCHIVE'"
+        if update_archive "$ARCHIVE"; then
+            say 0 "Update successful"
+        else
+            say 0 "Update finished with $ERRORS errors. You may need to take further action."
         fi
 
-        >&2 echo "E: Not yet implemented"
-        exit 507
-        
     # Otherwise, update all known archives
     else
-        >&2 echo "E: Not yet implemented"
-        exit 507
+        if ARCHIVES=$(config_jq -cr '.archives'); then
+            if [ "$ARCHIVES" == "null" ]; then
+                say 0 "No archive given and no archives found. Nothing to do."
+            else
+                say 0 ":: Updating all configured archives ::"
+                say 0
+                while read -r -d $'\x1e' archive || [[ $archive ]]; do
+                    say 0 "Updating archive at : $archive"
+                    if update_archive "$archive"; then
+                        say 0 "Update successful"
+                    else
+                        say 0 "Update finished with $ERRORS errors. You may need to take further action."
+                    fi
+                done < <(echo "$ARCHIVES" | jq -r '[.[] | .path] | join("\u001e")')
+            fi
+        else
+            exit "${PIPESTATUS[0]}"
+        fi
     fi
 fi
 
