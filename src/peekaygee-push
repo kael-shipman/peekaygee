@@ -114,12 +114,12 @@ if [ "$lib_rexec_loaded" != "true" ]; then
     say 1 "Loading librexec"
     if [ -z "$LIBREXEC_DIR" ]; then 
         say 1 "LIBREXEC_DIR not set. Setting..."
-        LIBREXEC_DIR="$(readlink -f "$(dirname "$(readlink -f "$0")")/../../librexec/src")" \
+        LIBREXEC_DIR="$(readlink -f "$(dirname "$(readlink -f "$0")")/../../ks-std-libs/src/usr/lib/ks-std-libs")" \
         || \
         LIBREXEC_DIR=
         say 2 "LIBREXEC_DIR set to '$LIBREXEC_DIR'"
     fi
-    for libdir in "$LIBREXEC_DIR" "$REXEC_LIBDIR" /usr/lib/librexec; do
+    for libdir in "$LIBREXEC_DIR" /usr/lib/ks-std-libs; do
         say 3 "Checking for librexec at '$libdir/librexec.sh'"
         if [ -e "$libdir/librexec.sh" ]; then
             say 3 "Found. Loading librexec"

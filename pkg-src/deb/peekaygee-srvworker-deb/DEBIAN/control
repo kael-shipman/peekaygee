@@ -1,0 +1,10 @@
+Package: peekaygee-srvworker-deb
+Version: ::VERSION::
+Section: free
+Priority: optional
+Architecture: all
+Depends: libpeekaygee, jq, reprepro, dpkg
+Installed-Size: 0
+Maintainer: Kael Shipman <kael.shipman@gmail.com>
+Description: The official peekaygee debian archive worker utility
+ See https://github.com/kael-shipman/peekaygee for more details

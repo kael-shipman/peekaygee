@@ -1,0 +1,10 @@
+Package: libpeekaygee
+Version: ::VERSION::
+Section: free
+Priority: optional
+Architecture: all
+Depends: ks-std-libs (>=0.8.0), jq
+Installed-Size: 0
+Maintainer: Kael Shipman <kael.shipman@gmail.com>
+Description: peekaygee libraries
+ See https://github.com/kael-shipman/peekaygee for more details

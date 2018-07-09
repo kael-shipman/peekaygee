@@ -1,0 +1,12 @@
+{
+    "build-dirs": ["build"],
+    "packages": {
+        "deb": {
+            "match": ".*\\.deb$",
+            "type": "deb",
+            "options": {
+                "releases": ["bionic"]
+            }
+        }
+    }
+}

@@ -10,17 +10,19 @@ function say() {
     fi
 
     # Make sure we've passed a level for this message
-    if ! [ "$1" -eq "$1" ] &>/dev/null; then
+    local level="$1"
+    shift
+    if ! [ "$level" -eq "$level" ] &>/dev/null; then
         >&2 echo "E: Programmer: First argument to 'say' must be an integer representing"
         >&2 echo "   level of verbosity at which to output this message"
         exit 34
     fi
 
-    if [ "$1" -le "$VERBOSITY" ]; then
-        if [ "$1" -gt 0 ]; then
-            >&2 echo "[verbose$1] $2"
+    if [ "$level" -le "$VERBOSITY" ]; then
+        if [ "$level" -gt 0 ]; then
+            >&2 echo "[verbose$1] $@"
         else
-            echo "$2"
+            echo "$@"
         fi
     fi
 }
