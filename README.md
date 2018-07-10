@@ -124,6 +124,7 @@ Here's a full example using every possible config option (at the time of this wr
             }
         }
     },
+    "default-remote": "production",
     "build-dirs": ["build"],
     "packages": {
         "deb": {
@@ -149,6 +150,8 @@ Explanations:
 **remotes.[name].url** (required) -- The url of the remote. May be a local path or an ssh-formatted remote path.
 
 **remotes.[name].package-opts** (optional) -- A collection of additional options to apply on a per-remote basis when pushing packages. In this example, I'm enabling "force" mode when pushing debian packages to my "production" archive, even though it is not normally enabled by the options defined in the "apt" package specification. (See `packages.[name].options` below for more details.)
+
+**default-remote** (optional) -- If specified, this remote will be used if none is given on the command line.
 
 **build-dirs** (required) -- An array of directories to search for built files. May be relative or absolute, but must be local.
 

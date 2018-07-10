@@ -97,7 +97,7 @@ fi
 
 # Load libraries
 D="$(dirname "$(readlink -f "$0")")"
-for libdir in "$D" "$PEEKAYGEE_LIBDIR" /usr/lib/peekaygee; do
+for libdir in "$D/../lib/peekaygee" "$PEEKAYGEE_LIBDIR" /usr/lib/peekaygee; do
     if [ -e "$libdir/libpeekaygee-srvworker.sh" ]; then
         . "$libdir/libpeekaygee-srvworker.sh"
         lib_loaded=true

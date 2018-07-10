@@ -78,22 +78,13 @@ if [ "$VERBOSITY" -eq -1 ]; then
     v="-q"
 fi
 
-# Validate empties
-if [ -z ${REMOTE+x} ]; then
-    >&2 echo_push_usage
-    >&2 echo
-    >&2 echo "E: You haven't passed a remote!"
-    >&2 echo
-    exit 7
-fi
-
 
 # Load libraries
 
 # Load libpeekaygee
 if [ -z "$D" ]; then
     D="$(dirname "$(readlink -f "$0")")"
-    for libdir in "$D" "$PEEKAYGEE_LIBDIR" /usr/lib/peekaygee; do
+    for libdir in "$D/../lib/peekaygee" "$PEEKAYGEE_LIBDIR" /usr/lib/peekaygee; do
         if [ -e "$libdir/libpeekaygee.sh" ]; then
             . "$libdir/libpeekaygee.sh"
             lib_loaded=true
@@ -146,16 +137,30 @@ else
 fi
 
 
-say 0 "Attempting to push packages to '$REMOTE'"
-say 0
-
-
 # Validate config
 require_config
 check_config
 
 
-# Check config to make sure remote exists
+# If no REMOTE passed, see if we can get a default
+if [ -z "$REMOTE" ]; then
+    say 1 "No remote defined. Looking for default."
+    if [ "$(config_jq -j '.remotes | length')" -eq 1 ]; then
+        REMOTE="$(config_jq -jc '.remotes | keys | first')"
+        say 2 "Only 1 remote defined. Using that ('$REMOTE')"
+    elif config_jq -e '.["default-remote"]' >/dev/null; then
+        REMOTE="$(config_jq -jc '.["default-remote"]')"
+        say 2 "More than one remote defined, but 'default-remote' defined. Using that ('$REMOTE')"
+    else
+        >&2 echo_push_usage
+        >&2 echo
+        >&2 echo "E: You haven't passed a remote or defined 'default-remote', and there's more than one remote defined."
+        >&2 echo
+        exit 7
+    fi
+fi
+
+# Make sure remote exists
 if ! config_jq -e '.remotes."'$REMOTE'"' >/dev/null; then
     >&2 echo_push_usage
     >&2 echo
@@ -167,6 +172,11 @@ else
     say 1 "Remote '$REMOTE' exists in config"
 fi
 REMOTE_PATH="$(config_jq -j '.remotes."'$REMOTE'".url')"
+
+
+say 0 "Attempting to push packages to '$REMOTE'"
+say 0
+
 say 2 "Remote path: '$REMOTE_PATH'"
 
 # Make sure peekaygee-archive is installed
