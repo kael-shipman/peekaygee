@@ -118,7 +118,7 @@ Here's a full example using every possible config option (at the time of this wr
         "production": {
             "url": "my-server.com:/srv/www/packages.my-server.com",
             "package-opts": {
-                "apt": {
+                "deb": {
                     "force": true
                 }
             }
