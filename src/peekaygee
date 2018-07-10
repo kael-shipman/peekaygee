@@ -35,6 +35,9 @@ function echo_usage() {
     echo "      show-remotes"
     echo "          show all configured remotes and (if -v specified) their urls"
     echo
+    echo "      dump-config"
+    echo "          gather all pertinent config and dump it, usually for debugging purposes"
+    echo
     echo "GLOBAL OPTIONS"
     echo "      -h|--help"
     echo "          Show this help text. Note: you can also pass --help|-h to any subcommand"
@@ -52,7 +55,7 @@ function echo_usage() {
 if [ -z "$VERBOSITY" ]; then VERBOSITY=0; fi
 while [ "$#" -gt 0 ]; do
     case "$1" in
-        push|delete|prune|list|show-remotes)
+        push|delete|prune|list|show-remotes|dump-config)
             COMMAND="$1"
             shift
             break
@@ -142,6 +145,12 @@ if [ "$COMMAND" == "show-remotes" ]; then
     require_config
     check_config
     show_remotes
+
+# Dump config
+elif [ "$COMMAND" == "dump-config" ]; then
+    require_config
+    check_config
+    config_jq "."
 
 # Other commands
 else

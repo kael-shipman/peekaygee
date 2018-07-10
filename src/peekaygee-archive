@@ -192,11 +192,151 @@ function type_supported() {
 
 function initialize_archive() {
     local ROOT="$1"
-    mkdir -p "$ROOT/srv-config"
+    mkdir -p "$ROOT"/{srv-config,logs}
     mkdir -p "$ROOT"/{incoming,webroot}/{public,private}
     echo "$PKG_VERSION" >"$ROOT/.peekaygee-version"
 
-    #TODO: Create apache and nginx vhost templates
+    # Create private users file
+    if [ ! -e "$ROOT/srv-config/htpasswd" ]; then
+        read -p "No private users set up. Would you like to set up private users now? [Y,n] " ANS
+        if [ "${ANS,,}" != "n" ]; then
+            set_up_private_users "$ROOT"
+        fi
+    fi
+
+    # Create nginx and apache vhost templates
+    local srvdir="$(readlink -f "$ROOT")"
+    local srvname="$(basename "$srvdir")"
+
+    # Nginx
+    if [ ! -e "$ROOT/srv-config/nginx.conf" ]; then
+        cat << EOF > "$ROOT/srv-config/nginx.conf"
+server {
+    listen 80;
+    listen 443 ssl;
+    server_name $srvname;
+    root $srvdir/webroot;
+
+    error_log $srvdir/logs/errors.log;
+    access_log $srvdir/logs/access.log;
+
+    location / {
+        disable_symlinks off;
+    }
+
+    location /public {
+        autoindex on;
+    }
+
+    location /private {
+        auth_basic "Private";
+        auth_basic_user_file $srvdir/srv-config/htpasswd;
+        autoindex on;
+    }
+}
+EOF
+    fi
+
+    # Apache
+    if [ ! -e "$ROOT/srv-config/apache.conf" ]; then
+        cat << EOF > "$ROOT/srv-config/apache.conf"
+<VirtualHost *:80>
+    ServerName $srvname
+    DocumentRoot $srvdir/webroot
+    <Directory $srvdir/webroot>
+        Require all granted
+        AllowOverride None
+        Options -Indexes +FollowSymlinks
+    </Directory>
+    <Directory $srvdir/webroot/private>
+        AuthType Basic
+        AuthName "Username and password, please:"
+        Require valid-user
+        AuthUserFile $srvdir/srv-config/htpasswd
+        Options +Indexes
+    </Directory>
+    <Directory $srvdir/webroot/public>
+        Options +Indexes
+    </Directory>
+
+    ErrorLog $srvdir/logs/errors.log
+    CustomLog $srvdir/logs/access.log custom
+</VirtualHost>
+EOF
+    fi
+}
+
+function set_up_private_users() {
+    local ROOT="$1"
+    if [ ! -e "$ROOT" ]; then
+        mkdir -p "$ROOT/srv-config"
+    fi
+
+    local users=()
+    if [ ! -e "$ROOT/srv-config/htpasswd" ]; then
+        touch "$ROOT/srv-config/htpasswd"
+    fi
+
+    say 0 "Existing users: "
+    say 0
+    local users=()
+    local numusers=0
+    while IFS=":" read -u10 -r -d $'\n' -a user; do
+        !((numusers++))
+        say 0 "$numusers. ${user[0]}"
+    done 10< <(grep '^[^:]+' "$ROOT/srv-config/htpasswd")
+
+    if [ "$numusers" -eq 0 ]; then
+        say 0 "(None)"
+    fi
+
+    say 0
+
+    local quit="false"
+    while [ "$quit" == "false" ]; do
+        say 0 "What would you like to do?"
+        say 0
+        say 0 " 1. Add a user"
+        say 0 " 2. Change a user's password"
+        say 0 " 3. Nothing (done)"
+        say 0
+        read ANS
+
+        if [ "$ANS" == "3" ]; then
+            quit="true"
+        elif [ "$ANS" == "1" ] || [ "$ANS" == "2" ]; then
+            local uname=
+            local pw=
+            local msg=
+
+            if [ "$ANS" == "2" ]; then
+                say 0 "Changing password. Please select user."
+                msg="Password changed successfully"
+            else
+                say 0 "Adding a user"
+                msg="User added successfully"
+            fi
+            say 0
+
+            read -p "Username: " uname
+            read -s -p "Password: " pw
+            say 0
+            say 0
+
+            sed -i "/^$uname:/d" "$ROOT/srv-config/htpasswd"
+            if pw=$(openssl passwd -crypt "$pw"); then
+                if printf "$uname:$pw\n" >> "$ROOT/srv-config/htpasswd"; then
+                    say 0 "$msg"
+                else
+                    exit "$?"
+                fi
+            else
+                exit "$?"
+            fi
+        else
+            >&2 echo "E: '$ANS' not valid. Please choose again."
+        fi
+    done
 }
 
 # Initial loop to gather global options and main command

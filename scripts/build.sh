@@ -4,6 +4,7 @@ set -e
 
 function setup_env() {
     setup_deb_env $@
+    rm -Rf "$builddir"/*
 }
 
 function place_files() {

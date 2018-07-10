@@ -182,7 +182,7 @@ fi
 
 # Make sure archive is initialized
 say 2 "Initializing archive on remote '$REMOTE'"
-if ! rexec "$REMOTE_PATH" "peekaygee-archive $v init \"::path::\""; then
+if ! rexec -t "$REMOTE_PATH" "peekaygee-archive $v init \"::path::\""; then
     >&2 echo
     >&2 echo "E: Couldn't initialize '$REMOTE_PATH'. Can't continue."
     >&2 echo
