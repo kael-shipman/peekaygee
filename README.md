@@ -14,7 +14,7 @@ There are a few things to note up front:
 
 Since `peekaygee` is a client/server utility, you'll have to install it both locally and and on your remote package server. (If you're serving packages out of your local machine, it'll work just fine that way, too.) Here's what you need to do:
 
-1. **Install `peekaygee` using your OS package manager** (or by just placing the source files in the right locations, though there are a few pesky dependencies to worry about). You can try my repo at https://packages.kaelshipman.me. Currently there are only debian packages available.
+1. **Install `peekaygee` using your OS package manager** (or by just placing the source files in the right locations, though there are a few pesky dependencies to worry about, see below). You can try my repo at https://packages.kaelshipman.me. Currently there are only debian packages available.
 2. **On your local machine, add a configuration file** (you'll probably want to use `~/.config/peekaygee/peekaygee.json`) that defines one or more remotes (see Config Options below for more details).
 3. **On your server, install the `peekaygee-srvworker-*` package that matches the types of packages you want to serve.** For example, if you want to serve, debian packages, install `peekaygee-srvworker-deb`. If no `srvworker` package is available for the types of packages you want to publish, consider writing one. See `Server Worker Interface` below.
 4. **On your server, make sure you've got permissions set up correctly for managing and serving your archive.** For example, if your archive is at `/srv/www/packages.my-site.com`, you'll probably want to do this: `sudo setfacl -Rm user:$USER:rwX,default:user:$USER:rwX /srv/www/packages.my-site.com && mkdir -p /srv/www/packages.my-site.com/webroot && sudo setfacl -Rm user:www-data:rX,default:user:www-data:rX /srv/www/packages.my-site.com/webroot`. That will give your user read/write access to everything and the webserver user r access to the web root directory.
@@ -29,6 +29,17 @@ The various types may also have certain requirements. Here's what's required for
 For both of these, you can follow this useful tutorial [here](https://www.digitalocean.com/community/tutorials/how-to-use-reprepro-for-a-secure-package-repository-on-ubuntu-14-04).
 
 Other things may be required for other types of repositories.
+
+## Installation From Source
+
+If you'd like to install `peekaygee` from source, it's pretty easy (since it's all just shell scripts), but you have to make sure you've got all the dependencies. Here's what to do (on both client and server):
+
+1. Install [`jq`](https://github.com/stedolan/jq)
+2. Install `librexec.sh` from [`ks-std-libs`](https://github.com/kael-shipman/ks-std-libs)
+3. Copy `[peekaygee]/src/*` into your filesystem (for example, `git clone https://github.com/kael-shipman/peekaygee /tmp/peekaygee && sudo cp -R /tmp/peekaygee/src/* /`)
+4. Finally, make sure you symlink any of the included `srvworker` executables to their canonical names (e.g., `sudo ln -s /usr/bin/peekaygee-srvworker-deb-reprepro /usr/bin/peekaygee-srvworker-deb`. On Ubuntu systems, you'll do this via `update-alternatives`.)
+
+That should give you all the executables you need. Then you just have to worry about config.
 
 
 ## Usage

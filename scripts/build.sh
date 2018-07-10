@@ -14,13 +14,18 @@ function place_files() {
 
     if [ "$pkgname" == "libpeekaygee" ]; then
         mkdir -p "$targdir/usr/lib/peekaygee"
-        cp src/libpeekaygee.sh src/libpeekaygee-srvworker.sh "$targdir/usr/lib/peekaygee/"
+        cp -R src/usr/lib "$targdir/usr/"
     elif [ "$pkgname" == "peekaygee" ]; then
         mkdir -p "$targdir/usr/bin"
-        cp src/peekaygee src/peekaygee-archive src/peekaygee-push "$targdir/usr/bin/"
-    elif [ "$pkgname" == "peekaygee-srvworker-deb" ]; then
+        cp src/usr/bin/{peekaygee,peekaygee-archive,peekaygee-push} "$targdir/usr/bin/"
+    elif [ "$pkgname" == "peekaygee-srvworker-deb-reprepro" ]; then
         mkdir -p "$targdir/usr/bin"
-        cp src/peekaygee-srvworker-deb-reprepro "$targdir/usr/bin/"
+        cp src/usr/bin/peekaygee-srvworker-deb-reprepro "$targdir/usr/bin/"
+    else
+        >&2 echo
+        >&2 echo "E: Don't know how to handle packages of type $pkgtype"
+        >&2 echo
+        exit 14
     fi
 }
 
