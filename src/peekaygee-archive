@@ -35,6 +35,10 @@ function echo_usage() {
     echo "          given, the current working directory if it has an \`incoming\` directory, or in all"
     echo "          configured archives if no path given and no \`incoming\` directory found."
     echo
+    echo "      manage-users ([path])"
+    echo "          Manages the user database for the private part of the archive found at [path], or current"
+    echo "          working directory if it is an archive."
+    echo
     echo "GLOBAL OPTIONS"
     echo "      -h|--help"
     echo "          Show this help text. Note: you can also pass --help|-h to any subcommand"
@@ -268,6 +272,14 @@ EOF
 
 function set_up_private_users() {
     local ROOT="$1"
+    if [ ! -e "$ROOT/.peekaygee-version" ]; then
+        >&2 echo
+        >&2 echo "E: '$ROOT' does not appear to be an initialized"
+        >&2 echo "    peekaygee archive"
+        >&2 echo
+        return 33
+    fi
+
     if [ ! -e "$ROOT" ]; then
         mkdir -p "$ROOT/srv-config"
     fi
@@ -328,10 +340,10 @@ function set_up_private_users() {
                 if printf "$uname:$pw\n" >> "$ROOT/srv-config/htpasswd"; then
                     say 0 "$msg"
                 else
-                    exit "$?"
+                    return "$?"
                 fi
             else
-                exit "$?"
+                return "$?"
             fi
         else
             >&2 echo "E: '$ANS' not valid. Please choose again."
@@ -343,7 +355,7 @@ function set_up_private_users() {
 if [ -z "$VERBOSITY" ]; then VERBOSITY=0; fi
 while [ "$#" -gt 0 ]; do
     case "$1" in
-        init|supports|update)
+        init|supports|update|manage-users)
             COMMAND="$1"
             shift
             break
@@ -416,6 +428,14 @@ say 2 "Executing command $COMMAND"
 # Supports
 if [ "$COMMAND" == "supports" ]; then
     type_supported "$1"
+
+# Manage users
+elif [ "$COMMAND" == "manage-users" ]; then
+    ROOT="$1"
+    if [ -z "$ROOT" ]; then
+        ROOT="$PWD"
+    fi
+    set_up_private_users "$ROOT"
 
 # Init
 elif [ "$COMMAND" == "init" ]; then
