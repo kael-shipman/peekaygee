@@ -214,7 +214,7 @@ say 2 "Preserve pushed packages: $PRESERVE_PUSHED"
 
 PKGCNT=0
 ERRORS=0
-while read -r -d $'\x1e' prf || [[ $prf ]]; do
+while read -u9 -r -d $'\x1e' prf || [[ $prf ]]; do
     say 1 "Processing package profile '$prf'"
     prfconf="$(config_jq ".packages.\"$prf\"")"
 
@@ -298,7 +298,7 @@ while read -r -d $'\x1e' prf || [[ $prf ]]; do
     fi
 
     # Push each package up, creating an options file for it also, if applicable
-    while read -r -d $'\x1e' pkg || [[ $pkg ]]; do
+    while read -u10 -r -d $'\x1e' pkg; do
         success="true"
         say 0 "   - pushing '$pkg' to $VISIBILITY archive..."
         if ! rsync -u "$pkg" "$REMOTE_PATH/incoming/$VISIBILITY/"; then
@@ -311,7 +311,7 @@ while read -r -d $'\x1e' prf || [[ $prf ]]; do
             # If push succeeded, create an options file
             if [ "$OPTIONS" != "null" ]; then
                 optsfile="$(basename "$pkg").opts"
-                say 1 "  - creating options file '$optsfile'"
+                say 1 " - creating options file '$optsfile'"
 
                 # If the options file creation fails, roll back
                 if ! rexec "$REMOTE_PATH" "echo '$OPTIONS' > ::path::/incoming/$VISIBILITY/$optsfile"; then
@@ -325,17 +325,22 @@ while read -r -d $'\x1e' prf || [[ $prf ]]; do
             else
                 say 2 "No options file created."
             fi
+        fi
 
-            # If we were successful, increment and optionally delete local package
-            if [ "$success" == "true" ]; then
-                !((PKGCNT++))
-                if [ "$PRESERVE_PUSHED" != "true" ]; then
-                    rm "$pkg" || true
-                fi
+        # If we were successful, increment and optionally delete local package
+        if [ "$success" == "true" ]; then
+            !((PKGCNT++))
+            if [ "$PRESERVE_PUSHED" != "true" ]; then
+                say 1 " - deleting $pkg"
+                rm "$pkg" || true
+            else
+                say 1 " - preserving $pkg, even though successfully pushed"
             fi
         fi
-    done < <(echo "$PKGS")
-done < <(config_jq -jc '.packages | keys | join("\u001e")')
+
+        say 1 " - done processing $pkg"
+    done 10< <(echo "$PKGS")
+done 9< <(config_jq -jc '.packages | keys | join("\u001e")')
 
 
 # Done pushing, now update the remote and report

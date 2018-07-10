@@ -151,14 +151,16 @@ if [ "$COMMAND" == "add" ]; then
     # Debian archives are predicated on releases (xenial, bionic, etc.). Thus, each package must be assigned at least one dist
     while read -r -d $'\x1e' DIST || [[ $DIST ]]; do
         say 1 " - adding $PKGFILE to $DIST"
-        if OUT="$(reprepro -b "$TARG_ARCHIVE" includedeb "$DIST" "$PKGFILE" 2>&1)"; then
+
+        # The following construct is to make sure that reprepro can attach to the pty to get input from the user
+        if { error=$(reprepro -b "$TARG_ARCHIVE" includedeb "$DIST" "$PKGFILE" 2>&1 1>&$out); } {out}>&1; then
             say 2 " - added successfully"
         else
             EXITCODE="$?"
             say 2 " - handling reprepro error"
 
             # If it's a duplicate package complaint, force or skip
-            if echo "$OUT" | grep -Fq "Already existing files"; then
+            if echo "$error" | grep -Fq "Already existing files"; then
                 say 2 " - duplicate package exists in archive"
 
                 # If we've asked to force packages in this repo, then remove the old and add the new
@@ -196,9 +198,9 @@ if [ "$COMMAND" == "add" ]; then
             # Otherwise, not sure what the error is. Exit dirty.
             else
                 >&2 echo
-                >&2 echo "E: reprepro reported an error:"
+                >&2 echo "E: reprepro reported an error. Can't continue."
                 >&2 echo
-                >&2 echo "$OUT"
+                >&2 echo "$error"
                 exit "$EXITCODE"
             fi
         fi

@@ -20,7 +20,7 @@ function say() {
 
     if [ "$level" -le "$VERBOSITY" ]; then
         if [ "$level" -gt 0 ]; then
-            >&2 echo "[verbose$1] $@"
+            >&2 echo "[verbose$level] $@"
         else
             echo "$@"
         fi
