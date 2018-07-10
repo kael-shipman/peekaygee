@@ -12,14 +12,12 @@ There are a few things to note up front:
 
 ## Installation
 
-Since `peekaygee` is actually a composite of several different components, installation isn't quite as straightforward as I'd like.
+Since `peekaygee` is a client/server utility, you'll have to install it both locally and and on your remote package server. (If you're serving packages out of your local machine, it'll work just fine that way, too.) Here's what you need to do:
 
-Since you're here, you're probably looking for an easy way to push packages that you've built locally to a remote server and have them slurped into that servers published indexes. Here's what you'll need to do:
-
-1. Install `peekaygee` using your OS package manager (or by just places the source files in the right locations, though there are a few pesky dependencies to worry about). You can try my repo at https://packages.kaelshipman.me.
-2. On your local machine, add a configuration file (you'll probably want to use `~/.config/peekaygee/peekaygee.json`) that defines one or more remotes (see Config Options below for more details).
-3. On your server, install the `peekaygee-srvworker-*` package that matches the types of packages you want to server. For example, if you want to serve, debian packages, install `peekaygee-srvworker-deb`. If no `srvworker` package is available for the types of packages you want to publish, consider writing one. See `Server Worker Interface` below.
-4. On your server, make sure you've got permissions set up correctly for managing and serving your archive. For example, if your archive is at `/srv/www/packages.my-site.com`, you'll probably want to do this: `sudo setfacl -Rm user:$USER:rwX,default:user:$USER:rwX /srv/www/packages.my-site.com && mkdir -p /srv/www/packages.my-site.com/webroot && sudo setfacl -Rm user:www-data:rX,default:user:www-data:rX /srv/www/packages.my-site.com/webroot`. That will give your user read/write access to everything and the webserver user r access to the web root directory.
+1. **Install `peekaygee` using your OS package manager** (or by just placing the source files in the right locations, though there are a few pesky dependencies to worry about). You can try my repo at https://packages.kaelshipman.me. Currently there are only debian packages available.
+2. **On your local machine, add a configuration file** (you'll probably want to use `~/.config/peekaygee/peekaygee.json`) that defines one or more remotes (see Config Options below for more details).
+3. **On your server, install the `peekaygee-srvworker-*` package that matches the types of packages you want to serve.** For example, if you want to serve, debian packages, install `peekaygee-srvworker-deb`. If no `srvworker` package is available for the types of packages you want to publish, consider writing one. See `Server Worker Interface` below.
+4. **On your server, make sure you've got permissions set up correctly for managing and serving your archive.** For example, if your archive is at `/srv/www/packages.my-site.com`, you'll probably want to do this: `sudo setfacl -Rm user:$USER:rwX,default:user:$USER:rwX /srv/www/packages.my-site.com && mkdir -p /srv/www/packages.my-site.com/webroot && sudo setfacl -Rm user:www-data:rX,default:user:www-data:rX /srv/www/packages.my-site.com/webroot`. That will give your user read/write access to everything and the webserver user r access to the web root directory.
 
 ### Type-Specific Setup
 

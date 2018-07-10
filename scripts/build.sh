@@ -20,7 +20,7 @@ function place_files() {
         cp src/peekaygee src/peekaygee-archive src/peekaygee-push "$targdir/usr/bin/"
     elif [ "$pkgname" == "peekaygee-srvworker-deb" ]; then
         mkdir -p "$targdir/usr/bin"
-        cp src/peekaygee-srvworker-deb "$targdir/usr/bin/"
+        cp src/peekaygee-srvworker-deb-reprepro "$targdir/usr/bin/"
     fi
 }
 
