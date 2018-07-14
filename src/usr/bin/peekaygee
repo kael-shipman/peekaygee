@@ -22,8 +22,10 @@ function echo_usage() {
     echo "      list [remote] ([pkg-spec])"
     echo "          List all packages available on [remote], optionally filtered by [pkg-spec]"
     echo
-    echo "      push [remote]"
-    echo "          Push all packages matching configured package definitions to [remote]"
+    echo "      push [remote] ([pkgfile-spec])"
+    echo "          Push packages matching [pkgfile-spec], or all packages matching configured package"
+    echo "          definitions if [pkgfile-spec] not specified, to [remote]. [pkgfile-spec] should be"
+    echo "          a grep-compatible match string."
     echo
     echo "      delete [remote] [pkg-spec]"
     echo "          Delete all packages matching [pkg-spec] on [remote]"

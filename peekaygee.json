@@ -1,4 +1,9 @@
 {
+    "remotes": {
+        "test": {
+            "url": "tests/test-repo"
+        }
+    },
     "packages": {
         "deb": {
             "options": {

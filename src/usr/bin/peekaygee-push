@@ -10,11 +10,12 @@ SELF="$(basename "$0")"
 function echo_push_usage() {
     echo
     echo "SYNOPSIS"
-    echo "      $SELF [remote]"
+    echo "      $SELF [remote] ([pkgfile-spec])"
     echo
     echo "DESCRIPTION"
-    echo "      Push one or more packages (found using global and repo-specific config files)"
-    echo "      to the given remote archive."
+    echo "      Push packages matching [pkgfile-spec] to [remote], if [pkgfile-spec] specified."
+    echo "      Otherwise, push all packages matching the configured package profiles to the given"
+    echo "      remote archive. [pkgfile-spec] should be a grep-compatible match string."
     echo
     echo "OPTIONS"
     echo "      -h|--help"
@@ -53,11 +54,16 @@ while [ "$#" -gt 0 ]; do
                 REMOTE="$1"
                 shift
             else
-                >&2 echo_push_usage
-                >&2 echo
-                >&2 echo "E: You've passed an invalid command or option: $1"
-                >&2 echo
-                exit 6
+                if [ -z "$PKGFILE_SPEC" ]; then
+                    PKGFILE_SPEC="$1"
+                    shift
+                else
+                    >&2 echo_push_usage
+                    >&2 echo
+                    >&2 echo "E: You've passed an invalid command or option: $1"
+                    >&2 echo
+                    exit 6
+                fi
             fi
         ;;
     esac
@@ -192,7 +198,7 @@ fi
 
 # Make sure archive is initialized
 say 2 "Initializing archive on remote '$REMOTE'"
-if ! rexec -t "$REMOTE_PATH" "peekaygee-archive $v init \"::path::\""; then
+if ! rexec -t -o "LogLevel=QUIET" "$REMOTE_PATH" "peekaygee-archive $v init \"::path::\""; then
     >&2 echo
     >&2 echo "E: Couldn't initialize '$REMOTE_PATH'. Can't continue."
     >&2 echo
@@ -271,10 +277,15 @@ while read -u9 -r -d $'\x1e' prf || [[ $prf ]]; do
             >&2 echo "W: Search directory '$d' is not a directory. Skipping...."
             continue
         fi
-        while read pkg; do
-            say 3 "Adding package '$pkg' to list"
-            PKGS="${PKGS}$pkg"$'\x1e'
-        done < <(find "$d" -type f | egrep "$MATCH")
+
+        # Get package matches, optionally filtering through $PKGFILE_SPEC
+        if [ -z "$PKGFILE_SPEC" ]; then
+            say 1 "PKGFILE_SPEC not passed. Matching all available packages"
+            PKGS="$(find "$d" -type f | egrep "$MATCH" | tr $'\n' $'\x1e')"
+        else
+            say 1 "PKGFILE_SPEC passed. Refining matches with '$PKGFILE_SPEC'"
+            PKGS="$(find "$d" -type f | egrep "$MATCH" | egrep "$PKGFILE_SPEC" | tr $'\n' $'\x1e')"
+        fi
     done
 
     say 2
@@ -363,7 +374,7 @@ if [ "$PKGCNT" -gt 0 ]; then
     say 0 "Pushed $PKGCNT packages; now calling update on remote...."
 
     # Now that all packages have been uploaded, update the archive
-    if ! rexec -t "$REMOTE_PATH" "peekaygee-archive $v update \"::path::\""; then
+    if ! rexec -t -o "LogLevel=QUIET" "$REMOTE_PATH" "peekaygee-archive $v update \"::path::\""; then
         >&2 echo
         >&2 echo "E: Remote update failed. Packages may not be published."
         >&2 echo
@@ -373,9 +384,12 @@ if [ "$PKGCNT" -gt 0 ]; then
     fi
 else
     if [ "$ERRORS" -gt 0 ]; then
-        say 0 "Nothing pushed, although there were $ERRORS errors"
+        say 0 "$ERRORS errors, nothing pushed"
     else
-        say 0 "Nothing pushed; all done"
+        say 0"Nothing pushed; all done"
+    fi
+    if [ -n "$PKGFILE_SPEC" ]; then
+        say 0 "(pushable packages were reduced by matching against '$PKGFILE_SPEC')"
     fi
 fi
 
