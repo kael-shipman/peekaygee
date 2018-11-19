@@ -27,6 +27,35 @@ function say() {
     fi
 }
 
+function set_xdg_defaults() {
+    if [ -z "$HOME" ]; then
+        >&2 echo "peekaygee: set_xdg_defaults: ERROR: Required environment variable '\$HOME' not set."
+        return 3
+    fi
+
+    if [ -z "$XDG_DATA_HOME" ]; then
+        XDG_DATA_HOME="$HOME/.local/share"
+    fi
+    if [ -z "$XDG_CONFIG_HOME" ]; then
+        XDG_CONFIG_HOME="$HOME/.config"
+    fi
+    if [ -z "$XDG_CACHE_HOME" ]; then
+        XDG_CACHE_HOME="$HOME/.cache"
+    fi
+    if [ -z "$XDG_RUNTIME_DIR" ]; then
+        XDG_RUNTIME_DIR=/run/user/"$(id -u)"
+    fi
+
+    mkdir -p "$XDG_DATA_HOME"
+    mkdir -p "$XDG_CONFIG_HOME"
+    mkdir -p "$XDG_CACHE_HOME"
+
+    if [ ! -e "$XDG_RUNTIME_DIR" ]; then
+        mkdir -p "$XDG_RUNTIME_DIR"
+        chmod 0700 "$XDG_RUNTIME_DIR"
+    fi
+}
+
 function get_config_file_options() {
     if [ -z "$CONFFILE_OPTIONS" ]; then
         say 2 "get_config_file_options: CONFFILE_OPTIONS not set. Gathering options."
@@ -40,8 +69,10 @@ function get_config_file_options() {
             exit 88
         fi
 
+        set_xdg_defaults
+
         declare -ga CONFFILE_OPTIONS
-        for confpath in "/etc/peekaygee" "/etc/peekaygee/$CONFFILE_NAME.d" "$HOME/.config/peekaygee" "$PWD"; do
+        for confpath in "/etc/peekaygee" "/etc/peekaygee/$CONFFILE_NAME.d" "$XDG_CONFIG_HOME/peekaygee" "$PWD"; do
             if echo "$confpath" | grep -q "\.d$"; then
                 say 3 "get_config_file_options: Adding '$confpath' to options"
                 CONFFILE_OPTIONS+=("$confpath")
@@ -50,6 +81,10 @@ function get_config_file_options() {
                 CONFFILE_OPTIONS+=("$confpath/$CONFFILE_NAME")
             fi
         done
+
+        # Add optional local override
+        say 3 "get_config_file_options: Adding '$PWD/${CONFFILE_NAME%.json}.local.json' to options"
+        CONFFILE_OPTIONS+=("$PWD/${CONFFILE_NAME%.json}.local.json")
     else
         say 2 "get_config_file_options: CONFFILE_OPTIONS already set. Using cached."
     fi
@@ -182,6 +217,18 @@ function config_jq() {
     echo "$MERGED_CONFIG" | jq "${args[@]}"
 }
 
+function pkg_pusher_preflight() {
+    # Warn if no SSH key in agent
+    if ! ssh-add -l &>/dev/null; then
+        >&2 echo "WARNING: Peekaygee uses many successive SSH connections to do its work. It"
+        >&2 echo "appears as though you don't have any private keys set up in your ssh agent,"
+        >&2 echo "and thus it's likely that you'll be repeatedly asked for your password. You"
+        >&2 echo "should add your private key to your ssh agent using \`ssh-add\` to make"
+        >&2 echo "using peekaygee more pleasant...."
+        >&2 echo
+    fi
+}
+
 
 
 
@@ -201,5 +248,11 @@ function show_remotes() {
         done < <(echo "$REMOTES" | jq -jc 'keys | join("\u001e")')
         echo "$OUT" | column -t
     fi
+}
+
+
+
+
+function show_local_repos() {
 }
 
