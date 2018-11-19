@@ -1,0 +1,318 @@
+#!/bin/bash
+
+set -e
+
+PKG_VERSION="::VERSION::"
+CONFFILE_NAME="peekaygee.json"
+SELF="$(basename "$0")"
+
+
+function echo_build_deb_usage() {
+    echo
+    echo "SYNOPSIS"
+    echo "      $SELF [src-tree] [build-dir]"
+    echo
+    echo "DESCRIPTION"
+    echo "      Build the specified debian package from files in [src-tree] and place the finished"
+    echo "      package in [build-dir]."
+    echo
+    echo "OPTIONS"
+    echo "      -h|--help"
+    echo "          Show this help text."
+    echo
+    echo "      -q|-v|-vv|-vvv"
+    echo "          Set the level of verbosity (-q = quiet, -v for verbose, etc.)"
+    echo
+    echo "      --version"
+    echo "          Print version information and exit"
+    echo
+    echo
+}
+
+
+# Loop to gather options
+if [ -z "$VERBOSITY" ]; then VERBOSITY=0; fi
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        -h|--help)
+            echo_build_deb_usage
+            exit
+        ;;
+
+        -q) VERBOSITY=-1; shift ;;
+        -v) !((VERBOSITY++)); shift ;;
+        -vv) VERBOSITY=2; shift ;;
+        -vvv) VERBOSITY=3; shift ;;
+
+        --version)
+            echo
+            echo "$SELF version $PKG_VERSION"
+            echo
+            echo "See readme and license information, file bug reports, and view source code at"
+            echo "https://github.com/kael-shipman/peekaygee"
+            echo
+            exit
+        ;;
+
+        *)
+            if [ -z "${srctree+x}" ]; then
+                srctree="$1"
+                shift
+            elif [ -z "${builddir+x}" ]; then
+                builddir="$1"
+                shift
+            else
+                >&2 echo_build_deb_usage
+                >&2 echo
+                >&2 echo "E: You've passed an invalid command or option: $1"
+                >&2 echo
+                exit 6
+            fi
+        ;;
+    esac
+done
+export VERBOSITY
+
+
+
+
+
+# Validate
+if [ -z "$srctree" ]; then
+    >&2 echo_build_deb_usage
+    >&2 echo
+    >&2 echo "$SELF: E: You must pass [src-tree] as the first argument"
+    exit 65
+fi
+if [ -z "$builddir" ]; then
+    >&2 echo_build_deb_usage
+    >&2 echo
+    >&2 echo "$SELF: E: You must pass [builddir] as the second argument"
+    exit 66
+fi
+
+
+
+
+# Load libraries
+
+# Load libpeekaygee
+if [ -z "$D" ]; then
+    D="$(dirname "$(readlink -f "$0")")"
+    for libdir in "$D/../lib/peekaygee" "$PEEKAYGEE_LIBDIR" /usr/lib/peekaygee; do
+        if [ -e "$libdir/libpeekaygee.sh" ]; then
+            . "$libdir/libpeekaygee.sh"
+            lib_loaded=true
+            break
+        fi
+    done
+fi
+if [ "$lib_loaded" != "true" ]; then
+    >&2 echo
+    >&2 echo "E: Couldn't find peekaygee libraries! Are you sure you've installed"
+    >&2 echo "   peekaygee correctly?"
+    >&2 echo
+    exit 5
+fi
+
+
+
+
+
+
+
+# Define functions
+
+##
+# Argument-checking function
+#
+# @param string $pkgdir The root of the deb package being built
+# @return 0|1
+# @stdout $pkgdir
+##
+function require_pkg_dir() {
+    if [ ! -d "$1" ]; then
+        >&2 echo "E: First argument should be the root directory of the package you're"
+        >&2 echo "   building. You passed '$1', which isn't a valid directory."
+        return 1
+    fi
+    echo "$1"
+}
+
+##
+# Temporarily clears extra files like .swp files, setting the $extrafiles environment
+# variable to be used later to restore them.
+#
+# @param string $pkgdir The root of the deb package being built
+# @return 0|1
+# @stdout void
+##
+function clear_extra_files() {
+    local PKGDIR=
+    if ! PKGDIR="$(require_pkg_dir "$1")"; then
+        return 61
+    fi
+    shift
+
+    unset extrafiles
+    declare -ag extrafiles
+    filestore=/tmp/pkg-builder-deb-extra-filestore
+
+    # for each glob of file patterns...
+    while [ "$#" -gt 0 ]; do
+        local files="$(find "$PKGDIR" -name "$1")"
+        shift
+        if [ -n "$files" ]; then
+            while read -u 3 -d $'\n' f; do
+                f="$(echo "$f" | sed "s#$PKGDIR/\?##")"
+                extrafiles[${#extrafiles[@]}]="$f"
+                mkdir -p "$filestore/$(dirname "$f")"
+                mv "$PKGDIR/$f" "$filestore/$f"
+            done 3< <(echo "$files")
+        fi
+    done
+}
+
+##
+# Restores files previously cleared by clear_extra_files
+#
+# @param string $pkgdir The root of the deb package being built
+# @return 0|1
+# @stdout void
+##
+function restore_extra_files() {
+    local PKGDIR=
+    if ! PKGDIR="$(require_pkg_dir "$1")"; then
+        return 1
+    fi
+
+    if [ "${#extrafiles[@]}" -gt 0 ]; then
+        for f in ${extrafiles[@]}; do
+            mv "$filestore/$f" "$PKGDIR/$f"
+        done
+    fi
+
+    rm -Rf "$filestore"
+}
+
+
+##
+# Combs through all directories under $pkgsrc, excluding "DEBIAN", and calculates the total
+# size of the installed package.
+#
+# @param string $pkgdir The root of the deb package being built
+# @return 0|1
+# @stdout void
+##
+function update_pkg_size() {
+    local PKGDIR=
+    if ! PKGDIR="$(require_pkg_dir "$1")"; then
+        return 1
+    fi
+
+    local PKGSIZE=0
+    while read -d '' -r f; do
+        local sz=$(stat -c%s "$f")
+        !((PKGSIZE+=$sz))
+    done < <(find "$PKGDIR" -type f -not -path "*DEBIAN*" -print0)
+    !((PKGSIZE/=1024))
+    if grep -q 'Installed-Size:' "$PKGDIR/DEBIAN/control"; then
+        sed -i 's/^Installed-Size:.*/Installed-Size: '"$PKGSIZE"'/' "$PKGDIR/DEBIAN/control"
+    else
+        echo "Installed-Size: $PKGSIZE" >> "$PKGDIR/DEBIAN/control"
+    fi
+}
+
+##
+# Combs through all directories under $pkgsrc, excluding "DEBIAN", and calculates the md5 sum
+# of every file found, outputting to $pkgsrc/DEBIAN/md5sums.
+#
+# @param string $pkgdir The root of the deb package being built
+# @return 0|1
+# @stdout void
+##
+function update_md5s() {
+    local PKGDIR=
+    if ! PKGDIR="$(require_pkg_dir "$1")"; then
+        return 1
+    fi
+
+    local files=$(find "$PKGDIR" -not -type d -not -path "*DEBIAN*")
+    if [ -n "$files" ]; then
+        md5sum $files > "$PKGDIR/DEBIAN/md5sums"
+        local repl=$(echo "$PKGDIR/" | sed 's/\//\\\//g') # escape slashes in pathnam
+        sed -i "s/$repl//g" "$PKGDIR/DEBIAN/md5sums" # make files in md5sums relative to package root
+    else
+        echo -n > "$PKGDIR/DEBIAN/md5sums"
+    fi
+}
+
+##
+# Combs through all directories under $pkgsrc, excluding "DEBIAN", and, if second argument is "root", for any
+# file owned by the current active user, changes ownership to root. If second argument is blank (or otherwise
+# not "root"), it changes ownership back to the current active user.
+#
+# @param string $pkgdir The root of the deb package being built
+# @param string "root"|null If changing to root, then "root"; otherwise, null
+# @return 0|1
+# @stdout void
+##
+function change_ownership() {
+    local PKGDIR=
+    if ! PKGDIR="$(require_pkg_dir "$1")"; then
+        return 1
+    fi
+    shift
+
+    local files=$(find "$PKGDIR" ! -path '*DEBIAN*')
+    if [ ! -z "$files" ]; then
+        if [ ! -z "$SUDO_USER" ]; then
+            local u="$SUDO_USER"
+        else
+            local u="$USER"
+        fi
+        if [ "$1" == 'root' ]; then
+            local targ='root'
+            local from="$u"
+        else
+            local targ="$u"
+            local from="root"
+        fi
+        for f in $files; do
+            local owner=
+            if [ "$(stat -c '%U' "$f")" == "$from" ]; then
+                owner="$targ"
+            fi
+            if [ "$(stat -c '%G' "$f")" == "$from" ]; then
+                owner="$owner:$targ"
+            fi
+            sudo chown "$owner" "$f"
+        done
+    fi
+}
+
+##
+# Main function
+##
+function build_deb_package() {
+    local srctree="$1"
+    local builddir="$2"
+    clear_extra_files "$srctree" "*.swp" "*.swo"
+    update_pkg_size "$srctree"
+    update_md5s "$srctree"
+    change_ownership "$srctree" root
+    dpkg --build "$srctree" "$builddir"
+    restore_extra_files "$srctree"
+    change_ownership "$srctree"
+}
+
+
+
+
+
+
+
+# Run
+
+build_deb_package "$srctree" "$builddir"
+

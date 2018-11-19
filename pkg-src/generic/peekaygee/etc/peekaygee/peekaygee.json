@@ -1,5 +1,12 @@
 {
     "build-dirs": ["build"],
+    "builder": {
+        "build-dir": "pkg-build",
+        "pkg-src-dir": "pkg-src",
+        "scripts": {
+            "place-files": "scripts/place-pkg-files.sh"
+        }
+    },
     "packages": {
         "deb": {
             "match": ".*\\.deb$",

@@ -1,0 +1,332 @@
+#!/bin/bash
+
+set -e
+
+PKG_VERSION="::VERSION::"
+CONFFILE_NAME="peekaygee.json"
+SELF="$(basename "$0")"
+
+
+function echo_build_usage() {
+    echo
+    echo "SYNOPSIS"
+    echo "      $SELF"
+    echo
+    echo "DESCRIPTION"
+    echo "      Build packages in the current working directory using parameters defined in"
+    echo "      \`$CONFFILE_NAME\` (and optionally \`${CONFFILE_NAME%.json}.local.json\`)."
+    echo
+    echo "OPTIONS"
+    echo "      -h|--help"
+    echo "          Show this help text."
+    echo
+    echo "      -q|-v|-vv|-vvv"
+    echo "          Set the level of verbosity (-q = quiet, -v for verbose, etc.)"
+    echo
+    echo "      --version"
+    echo "          Print version information and exit"
+    echo
+    echo
+}
+
+
+# Loop to gather options
+if [ -z "$VERBOSITY" ]; then VERBOSITY=0; fi
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        -h|--help)
+            echo_build_usage
+            exit
+        ;;
+
+        -q) VERBOSITY=-1; shift ;;
+        -v) !((VERBOSITY++)); shift ;;
+        -vv) VERBOSITY=2; shift ;;
+        -vvv) VERBOSITY=3; shift ;;
+
+        --version)
+            echo
+            echo "$SELF version $PKG_VERSION"
+            echo
+            echo "See readme and license information, file bug reports, and view source code at"
+            echo "https://github.com/kael-shipman/peekaygee"
+            echo
+            exit
+        ;;
+
+        *)
+            >&2 echo_build_usage
+            >&2 echo
+            >&2 echo "E: You've passed an invalid command or option: $1"
+            >&2 echo
+            exit 6
+        ;;
+    esac
+done
+export VERBOSITY
+
+
+
+
+# Load libraries
+
+# Load libpeekaygee
+if [ -z "$D" ]; then
+    D="$(dirname "$(readlink -f "$0")")"
+    for libdir in "$D/../lib/peekaygee" "$PEEKAYGEE_LIBDIR" /usr/lib/peekaygee; do
+        if [ -e "$libdir/libpeekaygee.sh" ]; then
+            . "$libdir/libpeekaygee.sh"
+            lib_loaded=true
+            break
+        fi
+    done
+fi
+if [ "$lib_loaded" != "true" ]; then
+    >&2 echo
+    >&2 echo "E: Couldn't find peekaygee libraries! Are you sure you've installed"
+    >&2 echo "   peekaygee correctly?"
+    >&2 echo
+    exit 5
+fi
+
+
+
+
+
+# Define functions
+
+function builder_run_hook() {
+    local hook
+    local hook_name="$1"
+    shift
+
+    # First check to see if this hook is defined in config
+    local hook_files=("$(config_jq -jc '.builder.hooks["'$hook_name'"]')" "$XDG_CONFIG_HOME/peekaygee/hooks/builder-$hook_name.sh")
+    for hook in "${hook_files[@]}"; do
+        if [ "$hook" == null ]; then
+            continue
+        fi
+        if [ -f "$hook" ]; then
+            if [ ! -x "$hook" ]; then
+                >&2 echo "$SELF: WARNING: builder $hook_name hook exists at '$hook'"
+                >&2 echo "but is not executable. This is probably a mistake."
+            else
+                say 1 "$SELF: builder_run_hook: Running hook '$hook'."
+                "$hook" "$@"
+                return
+            fi
+        else
+            say 1 "$SELF: builder_run_hook: Hook '$hook' not found."
+        fi
+    done
+}
+
+function builder_get_version() {
+    local pkgtype="$1"
+    local pkgname="$2"
+
+    if [ -z "$pkgtype" ]; then
+        >&2 echo "$SELF: builder_get_version: E: Programmer: you must pass package type as first argument"
+        return 58
+    fi
+    if [ -z "$pkgname" ]; then
+        >&2 echo "$SELF: builder_get_version: E: Programmer: you must pass package name as second argument"
+        return 59
+    fi
+
+    local pkgsrcdir="$(config_jq -jc '.builder["pkg-src-dir"]')"
+
+    local one="$pkgsrcdir/$pkgtype/$pkgname/VERSION"
+    local two="$pkgsrcdir/generic/$pkgname/VERSION"
+    local three="$pkgsrcdir/VERSION"
+    local four="PKG-VERSION"
+    local five="VERSION"
+
+    say 2 "$SELF: builder_get_version: Trying '$one'"
+    if [ -e "$one" ]; then
+        say 1 "$SELF: builder_get_version: Getting version from '$one'"
+        cat "$one"
+        return
+    fi
+
+    say 2 "$SELF: builder_get_version: Trying '$two'"
+    if [ -e "$two" ]; then
+        say 1 "$SELF: builder_get_version: Getting version from '$two'"
+        cat "$two"
+        return
+    fi
+
+    say 2 "$SELF: builder_get_version: Trying '$three'"
+    if [ -e "$three" ]; then
+        say 1 "$SELF: builder_get_version: Getting version from '$three'"
+        cat "$three"
+    fi
+
+    say 2 "$SELF: builder_get_version: Trying '$four'"
+    if [ -e "$four" ]; then
+        say 1 "$SELF: builder_get_version: Getting version from '$four'"
+        cat "$four"
+    fi
+
+    say 2 "$SELF: builder_get_version: Trying '$five'"
+    if [ -e "$five" ]; then
+        say 1 "$SELF: builder_get_version: Getting version from '$five'"
+        cat "$five"
+    fi
+
+    >&2 echo "$SELF: builder_get_version: E: You must create a package version file for package '$pkgname'. See peekaygee readme for help."
+    return 60
+}
+
+function builder_build_packages() {
+    say 2 "$SELF: running builder_build_packages"
+
+    # Set up local variables from config
+    local builddir pkgsrcdir place_files_script build_exec version
+    builddir="$(config_jq -jc '.builder["build-dir"]')"
+    pkgsrcdir="$(config_jq -jc '.builder["pkg-src-dir"]')"
+    place_files_script="$(config_jq -jc '.builder.scripts["place-files"]')"
+
+    if [ "$builddir" == "null" ]; then
+        >&2 echo
+        >&2 echo "$SELF: E: You must set a value for .builder.build-dir in your peekaygee.json config file."
+        >&2 echo
+        return 67
+    fi
+    if [ "$pkgsrcdir" == "null" ]; then
+        >&2 echo
+        >&2 echo "$SELF: E: You must set a value for .builder.pkg-src-dir in your peekaygee.json config file."
+        >&2 echo
+        return 68
+    fi
+    if [ "$place_files_script" == "null" ]; then
+        >&2 echo
+        >&2 echo "$SELF: E: You must set a value for .builder.scripts.place-files in your peekaygee.json config file."
+        >&2 echo
+        return 68
+    fi
+
+    # Sanity checks
+    if [ ! -d "$pkgsrcdir" ]; then
+        >&2 echo
+        >&2 echo "$SELF: E: Your package source dir ($pkgsrcdir) doesn't appear to exist. Are you sure you're running $SELF from your repo root?"
+        >&2 echo
+        return 54
+    fi
+
+    if [ ! -f "$place_files_script" ]; then
+        >&2 echo
+        >&2 echo "$SELF: E: Expecting script for placing package files at '$place_files_script', but doesn't exist."
+        >&2 echo
+        return 55
+    elif [ ! -x "$place_files_script" ]; then
+        >&2 echo
+        >&2 echo "$SELF: E: Script at '$place_files_script' not executable."
+        >&2 echo
+        return 56
+    fi
+
+    # Make sure builddir exists
+    mkdir -p "$builddir"
+
+    # Checkpoint
+    say 1 "$SELF: builder_build_packages: Using builddir '$builddir'"
+    say 1 "$SELF: builder_build_packages: Using pkgsrcdir '$pkgsrcdir'"
+
+    # Start processing package sources
+    local pkgcount=0
+    for pkgtype in "$pkgsrcdir"/*; do
+        if [ ! -e "$pkgtype" ]; then
+            continue;
+        fi
+        pkgtype="$(basename "$pkgtype")"
+
+        # Skip special "generic" folder
+        if [ "$pkgtype" == "generic" ]; then
+            say 3 "$SELF: builder_build_packages: Found special 'generic' package type. Skipping."
+            continue
+        fi
+
+        # See if we have a builder available for this type of package on the path
+        build_exec="peekaygee-builder-${pkgtype}"
+        if ! command -v "$build_exec" 2>/dev/null; then
+            >&2 echo "$SELF: W: No builder found for packages of type '$pkgtype'. Not attempting to build these packages."
+            continue
+        fi
+
+        say 2 "$SELF: builder_build_packages: Processing packages for type '$pkgtype'"
+
+        for pkgdir in "$pkgsrcdir/$pkgtype"/*; do
+            if [ ! -e "$pkgdir" ]; then
+                continue;
+            fi
+
+            pkgcount=$((pkgcount+1))
+
+            local pkgname="$(basename "$pkgdir")"
+            local stagedir="$builddir/$pkgname.$pkgtype"
+
+            say 0 "Preparing and building $pkgtype package '$pkgname'"
+
+            # Do initial copy of base files
+            say 3 "$SELF: builder_build_packages: Removing old '$stagedir', if present."
+            rm -Rf "$stagedir" 2>/dev/null
+            say 3 "$SELF: builder_build_packages: Copying '$pkgdir' to '$stagedir'."
+            cp -R --preserve=mode "$pkgdir" "$stagedir"
+
+            # Place generic files
+            if [ -e "$pkgsrcdir/generic/$pkgname" ]; then
+                say 3 "$SELF: builder_build_packages: Generic files exist. Copying over."
+                cp -R "$pkgsrcdir/generic/$pkgname"/* "$stagedir/"
+            fi
+
+            # Clean version file out of package
+            rm "$stagedir/VERSION" 2>/dev/null || true
+
+            # Call project-defined place-files script
+            say 2 "$SELF: builder_build_packages: Calling '$place_files_script' to place files for package '$pkgname' ($pkgtype)."
+            "$place_files_script" "$pkgname" "$stagedir" "$pkgtype"
+
+            # Replace version with current version (Making sure to escape the special VERSION selector so it doesn't get
+            # subbed out itself when the peekaygee package gets built)
+            version="$(builder_get_version "$pkgtype" "$pkgname")"
+            say 1 "$SELF: builder_build_packages: Setting ::VERSION:: equal to '$version' for '$pkgname' ($pkgtype)."
+            sed -i "s/::""VERSION""::/$version/g" $(grep -Frl "::""VERSION""::" "$stagedir" | sed '/\.sw[op]$/d')
+
+            # Call pre-build hook, if available
+            if ! builder_run_hook prebuild "$pkgname" "$stagedir" "$pkgtype"; then
+                >&2 echo "$SELF: E: There was an error running your prebuild hook! Building package anyway, but it may not be what you want."
+            fi
+
+            # Build deb package
+            say 1 "$SELF: builder_build_packages: Calling '$build_exec' for '$pkgname'"
+            "$build_exec" "$stagedir" "$builddir"
+
+            say 3 "$SELF: builder_build_packages: Removing '$stagedir' (cleanup)"
+            rm -Rf "$stagedir"
+        done
+
+        say 3 "$SELF: builder_build_packages: Done building packages for type '$pkgtype'"
+    done
+
+    if [ "$pkgcount" -eq 0 ]; then
+        >&2 echo
+        >&2 echo "W: No buildable packages found. Please make sure that "$pkgsrcdir" exists and has package template folders in it."
+        >&2 echo "   See https://github.com/kael-shipman/peekaygee for more information."
+        >&2 echo
+    fi
+
+    say 0 "Done building all packages."
+}
+
+
+
+# Validate config
+require_config
+check_config
+
+# Run build algorithm
+builder_run_hook prestart "$PWD"
+builder_build_packages
+builder_run_hook postfinish "$PWD"
+

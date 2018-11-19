@@ -252,7 +252,3 @@ function show_remotes() {
 
 
 
-
-function show_local_repos() {
-}
-

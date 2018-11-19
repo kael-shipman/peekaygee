@@ -1,0 +1,10 @@
+Package: peekaygee-builder-deb
+Version: ::VERSION::
+Section: free
+Priority: optional
+Architecture: all
+Depends: libpeekaygee, dpkg
+Installed-Size: 0
+Maintainer: Kael Shipman <kael.shipman@gmail.com>
+Description: The official peekaygee builder executable for debian packages
+ See https://github.com/kael-shipman/peekaygee for more details

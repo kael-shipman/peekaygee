@@ -14,13 +14,16 @@ function echo_usage() {
     echo "      $SELF [command] [command-options]"
     echo
     echo "DESCRIPTION"
-    echo "      \`peekaygee\` is the client program for the \`peekaygee\` package archive maintenance"
-    echo "      system. It is to be used on build machines to push built packages to remote archives"
-    echo "      for publication."
+    echo "      \`peekaygee\` is the client program for the \`peekaygee\` packaging and package repo"
+    echo "      maintenance system. It is to be used on build machines to build packages and push them"
+    echo "      to remote archive servers for publication."
     echo
     echo "COMMANDS"
     echo "      list [remote] ([pkg-spec])"
     echo "          List all packages available on [remote], optionally filtered by [pkg-spec]"
+    echo
+    echo "      build"
+    echo "          Build packages in the current working directory according to peekaygee config"
     echo
     echo "      push [remote] ([pkgfile-spec])"
     echo "          Push packages matching [pkgfile-spec], or all packages matching configured package"
@@ -57,7 +60,7 @@ function echo_usage() {
 if [ -z "$VERBOSITY" ]; then VERBOSITY=0; fi
 while [ "$#" -gt 0 ]; do
     case "$1" in
-        push|delete|prune|list|show-remotes|dump-config)
+        push|build|delete|prune|list|show-remotes|dump-config)
             COMMAND="$1"
             shift
             break
@@ -153,6 +156,10 @@ elif [ "$COMMAND" == "dump-config" ]; then
     require_config
     check_config
     config_jq "."
+
+# Show local repos that peekaygee knows about
+elif [ "$COMMAND" == "show-local-repos" ]; then
+    show_local_repos
 
 # Other commands
 else
