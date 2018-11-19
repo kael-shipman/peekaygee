@@ -160,18 +160,21 @@ function builder_get_version() {
     if [ -e "$three" ]; then
         say 1 "$SELF: builder_get_version: Getting version from '$three'"
         cat "$three"
+        return
     fi
 
     say 2 "$SELF: builder_get_version: Trying '$four'"
     if [ -e "$four" ]; then
         say 1 "$SELF: builder_get_version: Getting version from '$four'"
         cat "$four"
+        return
     fi
 
     say 2 "$SELF: builder_get_version: Trying '$five'"
     if [ -e "$five" ]; then
         say 1 "$SELF: builder_get_version: Getting version from '$five'"
         cat "$five"
+        return
     fi
 
     >&2 echo "$SELF: builder_get_version: E: You must create a package version file for package '$pkgname'. See peekaygee readme for help."
@@ -241,9 +244,9 @@ function builder_build_packages() {
         fi
         pkgtype="$(basename "$pkgtype")"
 
-        # Skip special "generic" folder
-        if [ "$pkgtype" == "generic" ]; then
-            say 3 "$SELF: builder_build_packages: Found special 'generic' package type. Skipping."
+        # Skip special "generic" folder and possible "VERSION" file
+        if [ "$pkgtype" == "generic" ] || [ "$pkgtype" == "VERSION" ]; then
+            say 3 "$SELF: builder_build_packages: Found special '$pkgtype' package type. Skipping."
             continue
         fi
 
