@@ -1,5 +1,5 @@
 {
-    "build-dirs": ["build"],
+    "build-dirs": ["pkg-build"],
     "builder": {
         "build-dir": "pkg-build",
         "pkg-src-dir": "pkg-src",
