@@ -19,7 +19,16 @@ function echo_push_usage() {
     echo
     echo "OPTIONS"
     echo "      -h|--help"
-    echo "          Show this help text."
+    echo "          Show this help text"
+    echo
+    echo "      -n|--no-delete"
+    echo "          Don't delete packages when finished pushing"
+    echo
+    echo "      -q|-v|-vv|-vvv"
+    echo "          Set level of verbosity"
+    echo
+    echo "      --version"
+    echo "          Show version information and exit"
     echo
     echo
 }
@@ -272,7 +281,7 @@ while read -u9 -r -d $'\x1e' prf || [[ $prf ]]; do
     # Search build dirs for matching packages
     PKGS=
     say 2 "Searching for packages...." 
-    for d in "$SEARCH_DIRS"; do
+    while read -u8 -r -d $'\x1e' d || [[ $prf ]]; do
         if [ ! -d "$d" ]; then
             >&2 echo "W: Search directory '$d' is not a directory. Skipping...."
             continue
@@ -286,7 +295,7 @@ while read -u9 -r -d $'\x1e' prf || [[ $prf ]]; do
             say 1 "PKGFILE_SPEC passed. Refining matches with '$PKGFILE_SPEC'"
             PKGS="$(find "$d" -type f | egrep "$MATCH" | egrep "$PKGFILE_SPEC" | tr $'\n' $'\x1e')"
         fi
-    done
+    done 8< <(echo "$SEARCH_DIRS")
 
     say 2
     say 2 "Ready to push packages"
@@ -305,7 +314,7 @@ while read -u9 -r -d $'\x1e' prf || [[ $prf ]]; do
     fi
 
     # Make sure the remote supports this type of package
-    say 3 "Checking remote for support or '$TYPE' packages"
+    say 3 "Checking remote for support of '$TYPE' packages"
     if ! rexec "$REMOTE_PATH" "peekaygee-archive $v supports '$TYPE'" >/dev/null; then
         >&2 echo
         >&2 echo "E: Remote '$REMOTE' doesn't support archive type '$TYPE'. Skipping the following packages:"
@@ -386,7 +395,7 @@ else
     if [ "$ERRORS" -gt 0 ]; then
         say 0 "$ERRORS errors, nothing pushed"
     else
-        say 0"Nothing pushed; all done"
+        say 0 "Nothing pushed; all done"
     fi
     if [ -n "$PKGFILE_SPEC" ]; then
         say 0 "(pushable packages were reduced by matching against '$PKGFILE_SPEC')"

@@ -15,6 +15,8 @@ function say() {
     if ! [ "$level" -eq "$level" ] &>/dev/null; then
         >&2 echo "E: Programmer: First argument to 'say' must be an integer representing"
         >&2 echo "   level of verbosity at which to output this message"
+        >&2 echo
+        >&2 echo "   You passed: '$level'"
         exit 34
     fi
 
