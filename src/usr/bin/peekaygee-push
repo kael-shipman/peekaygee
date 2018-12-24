@@ -281,7 +281,7 @@ while read -u9 -r -d $'\x1e' prf || [[ $prf ]]; do
     # Search build dirs for matching packages
     PKGS=
     say 2 "Searching for packages...." 
-    while read -u8 -r -d $'\x1e' d || [[ $prf ]]; do
+    while read -u8 -r -d $'\x1e' d || [[ $d ]]; do
         if [ ! -d "$d" ]; then
             >&2 echo "W: Search directory '$d' is not a directory. Skipping...."
             continue
