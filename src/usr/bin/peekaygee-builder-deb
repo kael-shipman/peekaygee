@@ -239,7 +239,10 @@ function update_md5s() {
 
     local files=$(find "$PKGDIR" -not -type d -not -path "*DEBIAN*")
     if [ -n "$files" ]; then
-        md5sum $files > "$PKGDIR/DEBIAN/md5sums"
+        echo > "$PKGDIR/DEBIAN/md5sums"
+        while read -u8 -d $'\n' -r file || [ -n "$file" ]; do
+          md5sum $file >> "$PKGDIR/DEBIAN/md5sums"
+        done 8< <(echo "$files")
         local repl=$(echo "$PKGDIR/" | sed 's/\//\\\//g') # escape slashes in pathnam
         sed -i "s/$repl//g" "$PKGDIR/DEBIAN/md5sums" # make files in md5sums relative to package root
     else
