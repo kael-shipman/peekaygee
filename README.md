@@ -3,7 +3,82 @@ Peekaygee
 
 Peekaygee is a framework for handling the creation and publishing of various types of packages. It attempts to be both a unified interface over packaging tools like npm, dpkg, etc., as well as an open-source alternative to services like packagecloud.io.
 
-Altogether, its main goals are the following:
+## Quick Start
+
+#### 1. Install and configure `peekaygee` on both client and server.
+
+See [Installation](#installation) below for instructions.
+
+On the client, you should configure your server as a remote. You'll usually do this in your `~/.config/peekaygee/peekaygee.json` file. See [Configuration Options](#configuration-options) below for more details.
+
+#### 2. Initialize a package server
+
+Make sure you have a basic webserver (apache, nginx or similar) installed on the machine you want to serve your packages. Then run the following:
+
+```
+SERVER_PATH=/srv/www/packages.your-domain.io
+sudo mkdir -p $SERVER_PATH
+peekaygee-archive init $SERVER_PATH
+```
+
+This results in the files and folders listed further down the page in [Archive Structure](#archive-structure). One of the folders created is `srv-config`, which contains both an apache and an nginx virtual host declaration. You can feel free to link those into your apache or nginx installs as-is or modify them to suit your specific needs.
+
+If you want to use a different web server, just riff on the apache or nginx files.
+
+#### 3. Create a `pkg-src` directory in your project
+
+This should follow the structure down below in [Usage](#usage). In brief, you should have _something like_ the following:
+
+```
+pkg-src/
+├── deb/
+│   └── my-project/
+│       ├── DEBIAN/
+│       │   ├── config
+│       │   ├── control
+│       │   ├── postinst
+│       │   └── templates
+│       └── VERSION
+├── generic/
+│   └── my-project/
+│       └── etc/
+│           └── systemd/
+│               └── system/
+│                   └── my-project.service
+└── rpm/
+    └── my-project/
+        ├── [some meta files....]
+        └── VERSION
+```
+
+The first level under `pkg-src` is the package type: `generic` for files common to all package types, `deb` for debian packages, `rpm` for rpm packages, etc.
+
+The level under that is the actual packages. You can have one or more packages for each package type. In this case, we're building a package called simply `my-project`.
+
+The level under that is package type-specific.
+
+#### 4. Add a `place-pkg-files.sh` script
+
+You should create a `scripts` directory at the root of your project and add to it an executable called `place-pkg-files.sh`. This file is called by `peekaygee build` like so:
+
+```
+./scripts/place-pkg-files.sh $pkgName $targDir $pkgType
+```
+
+You'll usually use this to build any source into final form and then copy the built files into the desired locations in `$targDir` for final packaging.
+
+#### 5. Run `peekaygee build`
+
+This will build all packages for which you have builders installed.
+
+#### 6. Run `peekaygee push nameOfMyArchive`
+
+This is the final step, and will take the packages you built in step 5 and push them to the defined remote.
+
+
+## Project Overview
+
+Altogether, peekaygee's main goals are the following:
 
 * Allow source code maintainers to easily maintain, build and publish packages from within the source code repository itself
 * Allow consumers to optionally build forks of official packages, and publish those package forks to alternative locations
@@ -41,6 +116,7 @@ The various package types may also have certain requirements. Here's what's requ
 For both of these, you can follow this useful tutorial [here](https://www.digitalocean.com/community/tutorials/how-to-use-reprepro-for-a-secure-package-repository-on-ubuntu-14-04).
 
 Other things may be required for other types of repositories.
+
 
 ## Installation From Source
 
@@ -244,7 +320,6 @@ Explanations:
 **packages.[name].visibility** (optional, default "public") -- Either "public" or "private". This defines whether the package will be published in the public section or the private section of your repository.
 
 **packages.[name].options** (optional) -- This is an arbitrary, worker-specific options hash that's passed along inline to the worker on the server. It may be used for anything, but in the case of debian packages, it's used to specify the releases (`dists`) the package should be published for and whether or not to forcefully replace a package that already exists in the given version at the server. Options for this hash are not well defined or documented yet....
-
 
 ### peekaygee-archive.json
 
