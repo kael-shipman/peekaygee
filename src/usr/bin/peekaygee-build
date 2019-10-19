@@ -10,11 +10,12 @@ SELF="$(basename "$0")"
 function echo_build_usage() {
     echo
     echo "SYNOPSIS"
-    echo "      $SELF"
+    echo "      $SELF ([options]) ([pkg-name](, [pkg-name]...))"
     echo
     echo "DESCRIPTION"
     echo "      Build packages in the current working directory using parameters defined in"
     echo "      \`$CONFFILE_NAME\` (and optionally \`${CONFFILE_NAME%.json}.local.json\`)."
+    echo "      If \`pkg-name\` is supplied, build only the given packages."
     echo
     echo "OPTIONS"
     echo "      -h|--help"
@@ -32,6 +33,7 @@ function echo_build_usage() {
 
 # Loop to gather options
 if [ -z "$VERBOSITY" ]; then VERBOSITY=0; fi
+PKGFILTER=$'\x1e'
 while [ "$#" -gt 0 ]; do
     case "$1" in
         -h|--help)
@@ -54,13 +56,19 @@ while [ "$#" -gt 0 ]; do
             exit
         ;;
 
-        *)
+        -*)
             >&2 echo_build_usage
             >&2 echo
             >&2 echo "E: You've passed an invalid command or option: $1"
             >&2 echo
             exit 6
         ;;
+
+        *)
+            PKGFILTER="${PKGFILTER}$1"$'\x1e'
+            shift
+        ;;
+
     esac
 done
 export VERBOSITY
@@ -202,12 +210,6 @@ function builder_build_packages() {
         >&2 echo
         return 68
     fi
-    if [ "$place_files_script" == "null" ]; then
-        >&2 echo
-        >&2 echo "$SELF: E: You must set a value for .builder.scripts.place-files in your peekaygee.json config file."
-        >&2 echo
-        return 68
-    fi
 
     # Sanity checks
     if [ ! -d "$pkgsrcdir" ]; then
@@ -217,16 +219,18 @@ function builder_build_packages() {
         return 54
     fi
 
-    if [ ! -f "$place_files_script" ]; then
-        >&2 echo
-        >&2 echo "$SELF: E: Expecting script for placing package files at '$place_files_script', but doesn't exist."
-        >&2 echo
-        return 55
-    elif [ ! -x "$place_files_script" ]; then
-        >&2 echo
-        >&2 echo "$SELF: E: Script at '$place_files_script' not executable."
-        >&2 echo
-        return 56
+    if [ "$place_files_script" != "null" ]; then
+        if [ ! -f "$place_files_script" ]; then
+            >&2 echo
+            >&2 echo "$SELF: E: Expecting script for placing package files at '$place_files_script', but doesn't exist."
+            >&2 echo
+            return 55
+        elif [ ! -x "$place_files_script" ]; then
+            >&2 echo
+            >&2 echo "$SELF: E: Script at '$place_files_script' not executable."
+            >&2 echo
+            return 56
+        fi
     fi
 
     # Make sure builddir exists
@@ -264,10 +268,17 @@ function builder_build_packages() {
                 continue;
             fi
 
-            pkgcount=$((pkgcount+1))
-
             local pkgname="$(basename "$pkgdir")"
             local stagedir="$builddir/$pkgname.$pkgtype"
+
+            # If we've specified that we only want certain packages, apply that filter here
+            say 3 "Checking package ${pkgname} against package filter '${PKGFILTER}'"
+            if [ "$PKGFILTER" != $'\x1e' ] && ! echo "$PKGFILTER" | grep -q $'\x1e'"$pkgname"$'\x1e'; then
+                say 2 "'${pkgname}' not found in '${PKGFILTER}'. Skipping."
+                continue;
+            fi
+
+            pkgcount=$((pkgcount+1))
 
             say 0 "Preparing and building $pkgtype package '$pkgname'"
 
